@@ -18,7 +18,7 @@
 
 ## Estructura de archivos
 - `index.html` — **toda la app** (markup + `<style>` + `<script>`).
-- `sw.js` — Service Worker (offline + actualizaciones). **`CACHE_VERSION` actual: `arborrisk-v4`**.
+- `sw.js` — Service Worker (offline + actualizaciones). **`CACHE_VERSION` actual: `arborrisk-v5`**.
 - `manifest.webmanifest` — manifest PWA (instalación).
 - `icon.svg` — icono vectorial (usado por el manifest y como `apple-touch-icon`/`favicon`).
 - `CLAUDE.md` — esta guía.
@@ -44,7 +44,7 @@ grep -nE "css/[a-z]+\.css|js/[a-z]+\.js" index.html
 | `js/pdf.js` | Generación de PDF con **jsPDF** (ficha individual y proyecto) |
 | `js/sync.js` | **Export/import JSON** (backup). `exportData`/`resolveForExport`/`blobToDataUrl`, export PDF de proyecto |
 | `js/core.js` | Inicialización (`DOMContentLoaded`), `setupPWA()` (registra `./sw.js`), prompt de instalación |
-| `js/map.js` | Mapa Leaflet, clustering de marcadores, picker de GPS |
+| `js/map.js` | Mapa Leaflet, clustering de marcadores, picker de GPS, **descarga de zona offline** (`downloadMapArea`/`runTileDownload`/`lngLatToTile`) |
 | `js/projects.js` | Agrupación de fichas por cliente/proyecto |
 | `js/config.js` | Configuración (tema, datos del profesional, etc.) |
 | `js/qr.js` | Generación de etiquetas con **QR** por ficha |
@@ -56,13 +56,14 @@ grep -nE "css/[a-z]+\.css|js/[a-z]+\.js" index.html
 - **Niveles de riesgo:** bajo / moderado / alto, con colores en variables CSS (`--low`, `--mod`, `--high`).
 
 ## PWA / Service Worker (detalles que no romper)
-- El SW es un archivo real: **`sw.js`**. `CACHE_VERSION` actual: **`arborrisk-v4`** (constante arriba de `sw.js`). Estrategia: **network-first** en navegaciones (con timeout y fallback a caché) + **cache-first** en el resto del mismo origen. Mismo patrón que el `sw.js` de presupuestos.
+- El SW es un archivo real: **`sw.js`**. `CACHE_VERSION` actual: **`arborrisk-v5`** (constante arriba de `sw.js`). Estrategia: **network-first** en navegaciones (con timeout y fallback a caché) + **cache-first** en el resto del mismo origen. Mismo patrón que el `sw.js` de presupuestos.
 - `APP_SHELL` (en `sw.js`) precachea `./`, `./index.html`, `./manifest.webmanifest`, `./icon.svg`. **Si agregás un archivo local nuevo, sumalo a `APP_SHELL`** o se rompe el offline.
 - **Cacheo de CDN (offline total):** el SW cachea cross-origin con **cache-first**:
   - `CDN_HOSTS` (`cdnjs.cloudflare.com`, `fonts.googleapis.com`, `fonts.gstatic.com`) → cache `…-cdn`. Cubre jsPDF, Leaflet, markercluster, QR y las fuentes. Se cachean **en la primera carga online**; después funcionan offline.
-  - Tiles de OSM (`*.tile.openstreetmap.org`) → cache `…-tiles` con **tope `TILE_MAX` (FIFO)**. Solo quedan offline los tiles **ya vistos** (no se puede cachear el mundo entero).
+  - Tiles de OSM (`*.tile.openstreetmap.org`) → cache `…-tiles` con **tope `TILE_MAX` (FIFO, 2500)**. Quedan offline los tiles **ya vistos** + los de las **zonas descargadas** (ver abajo).
   - Se aceptan respuestas **opacas** (no-cors), por eso `cacheFirst` no exige `status===200`.
   - El `activate` mantiene las 3 caches de la versión actual (`CURRENT_CACHES`) y borra las viejas. Al subir `CACHE_VERSION` se renuevan las 3 (incluida la de tiles).
+- **Descargar zona (offline dirigido):** el botón "⬇ Descargar zona" del mapa (`downloadMapArea`) calcula los tiles de la vista actual para los zooms `[z, z+2]` (replicando el esquema de subdominios `a/b/c` de Leaflet para que las claves de caché coincidan) y se los manda al SW por `postMessage({type:'CACHE_TILES', urls}, [port])`. El SW (`cacheTileList`) los descarga con concurrencia y reporta progreso por el `MessagePort`. Así una zona elegida queda 100% offline aunque no se haya recorrido tile por tile.
 - `start_url` `./index.html`, scope `./` (en `manifest.webmanifest`).
 
 ## Flujo de despliegue (SEGUIR SIEMPRE)

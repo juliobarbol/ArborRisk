@@ -873,7 +873,20 @@
 </style>
 <style>
 /* css/map.css */
-/* ── MARKER CLUSTER PERSONALIZADO ── */
+  /* ── BOTÓN DESCARGAR ZONA (offline) ── */
+  .map-dl-btn {
+    position: absolute; left: 10px; bottom: 22px; z-index: 1000;
+    display: none; align-items: center; gap: 6px;
+    background: var(--surface); color: var(--text);
+    border: 1px solid var(--border2); border-radius: 10px;
+    padding: 8px 12px; font-family: var(--head); font-size: 13px; font-weight: 600;
+    box-shadow: 0 2px 8px rgba(0,0,0,.28); cursor: pointer;
+  }
+  .map-dl-btn.show { display: inline-flex; }
+  .map-dl-btn:active { transform: translateY(1px); }
+  .map-dl-btn[disabled] { opacity: .6; cursor: progress; }
+
+  /* ── MARKER CLUSTER PERSONALIZADO ── */
   .marker-cluster-small,
   .marker-cluster-medium,
   .marker-cluster-large {
@@ -1181,6 +1194,9 @@
   <div class="map-view" id="map-view">
     <div id="map-container"></div>
     <div class="map-counter" id="map-counter" style="display:none"></div>
+    <button type="button" class="map-dl-btn" id="map-dl-btn"
+            onclick="downloadMapArea()"
+            title="Descargar los tiles de esta zona para usar el mapa sin conexión">⬇ Descargar zona</button>
   </div>
 
   <!-- CATASTRO VIEW -->
@@ -5653,6 +5669,8 @@ function renderMap() {
       + '<h3>Sin árboles geolocalizados</h3>'
       + '<p>Capturá la ubicación GPS al crear o editar una ficha para verla aquí.</p>';
     document.getElementById('map-view').appendChild(overlay);
+    var dlBtnEmpty = document.getElementById('map-dl-btn');
+    if (dlBtnEmpty) dlBtnEmpty.classList.remove('show');
     return;
   }
 
@@ -5660,6 +5678,8 @@ function renderMap() {
     counter.style.display = '';
     counter.textContent = geoRecords.length + ' árbol' + (geoRecords.length !== 1 ? 'es' : '') + ' en el mapa';
   }
+  var dlBtn = document.getElementById('map-dl-btn');
+  if (dlBtn) dlBtn.classList.add('show');
 
   // Inicializar mapa una sola vez
   if (!mapInitialized) {
@@ -5746,6 +5766,85 @@ function mapOpenDetail(id) {
   if (leafletMap) leafletMap.closePopup();
   switchTab('fichas');
   setTimeout(function() { openDetail(id); }, 50);
+}
+
+// ============================================================
+// DESCARGAR ZONA DEL MAPA (offline)
+// ============================================================
+// Convierte lon/lat a coordenadas de tile (esquema XYZ de OSM/Leaflet).
+function lngLatToTile(lon, lat, z) {
+  var n = Math.pow(2, z);
+  var x = Math.floor((lon + 180) / 360 * n);
+  var latRad = lat * Math.PI / 180;
+  var y = Math.floor((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n);
+  x = Math.max(0, Math.min(n - 1, x));
+  y = Math.max(0, Math.min(n - 1, y));
+  return { x: x, y: y };
+}
+
+// Descarga (cachea vía Service Worker) los tiles de la zona visible del mapa
+// para los niveles de zoom actuales + 2 más de detalle, así esa área queda
+// disponible sin conexión.
+function downloadMapArea() {
+  if (!leafletMap) { showToast('Abrí el mapa primero', 'error'); return; }
+  if (!('serviceWorker' in navigator) || !navigator.serviceWorker.controller) {
+    showToast('Modo offline no activo aún. Recargá con conexión y reintentá.', 'error');
+    return;
+  }
+
+  var b = leafletMap.getBounds();
+  var z0 = leafletMap.getZoom();
+  var zMax = Math.min(19, z0 + 2);
+  var subs = ['a', 'b', 'c']; // mismo esquema de subdominios que usa Leaflet
+  var urls = [];
+  for (var z = z0; z <= zMax; z++) {
+    var topLeft = lngLatToTile(b.getWest(), b.getNorth(), z);
+    var botRight = lngLatToTile(b.getEast(), b.getSouth(), z);
+    for (var x = topLeft.x; x <= botRight.x; x++) {
+      for (var y = topLeft.y; y <= botRight.y; y++) {
+        var s = subs[Math.abs(x + y) % 3];
+        urls.push('https://' + s + '.tile.openstreetmap.org/' + z + '/' + x + '/' + y + '.png');
+      }
+    }
+  }
+
+  if (!urls.length) { showToast('Zona vacía', 'error'); return; }
+
+  var LIMIT = 1500;
+  if (urls.length > LIMIT) {
+    var mb = Math.round(urls.length * 20 / 1024);
+    showConfirm('Descargar zona',
+      'Son ' + urls.length + ' tiles (~' + mb + ' MB). Para abarcar menos detalle, alejá el zoom antes de descargar. ¿Descargar igual?',
+      function() { runTileDownload(urls); });
+  } else {
+    runTileDownload(urls);
+  }
+}
+
+function runTileDownload(urls) {
+  var total = urls.length;
+  var btn = document.getElementById('map-dl-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⬇ 0/' + total; }
+  showToast('Descargando zona… 0/' + total);
+
+  var ch = new MessageChannel();
+  ch.port1.onmessage = function(e) {
+    var d = e.data || {};
+    if (d.finished) {
+      if (btn) { btn.disabled = false; btn.textContent = '⬇ Descargar zona'; }
+      showToast('Zona disponible offline (' + d.ok + '/' + d.total + ' tiles)', 'success');
+    } else {
+      if (btn && (d.done % 10 === 0 || d.done === d.total)) btn.textContent = '⬇ ' + d.done + '/' + d.total;
+      if (d.done % 25 === 0) showToast('Descargando zona… ' + d.done + '/' + d.total);
+    }
+  };
+
+  try {
+    navigator.serviceWorker.controller.postMessage({ type: 'CACHE_TILES', urls: urls }, [ch.port2]);
+  } catch (err) {
+    if (btn) { btn.disabled = false; btn.textContent = '⬇ Descargar zona'; }
+    showToast('No se pudo iniciar la descarga', 'error');
+  }
 }
 
 // ============================================================

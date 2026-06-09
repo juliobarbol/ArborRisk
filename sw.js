@@ -17,7 +17,7 @@
 //
 //  Para forzar actualizacion tras un deploy: subir el CACHE_VERSION.
 
-const CACHE_VERSION = 'arborrisk-v4';
+const CACHE_VERSION = 'arborrisk-v5';
 const RUNTIME_CACHE = CACHE_VERSION + '-cdn';    // libs + fuentes
 const TILE_CACHE    = CACHE_VERSION + '-tiles';  // tiles OSM (con tope)
 const CURRENT_CACHES = [CACHE_VERSION, RUNTIME_CACHE, TILE_CACHE];
@@ -35,9 +35,10 @@ const CDN_HOSTS = [
   'fonts.googleapis.com',
   'fonts.gstatic.com',
 ];
-// Tiles del mapa: cache-first con tope (FIFO).
+// Tiles del mapa: cache-first con tope (FIFO). El tope es generoso para que
+// una "descarga de zona" (varios niveles de zoom) entre completa.
 const TILE_HOST_RE = /(^|\.)tile\.openstreetmap\.org$/;
-const TILE_MAX = 800;
+const TILE_MAX = 2500;
 
 // -- Install: precachear el app shell (resiliente) ------------
 // Si un recurso puntual falla (red intermitente durante el deploy), NO
@@ -182,7 +183,47 @@ self.addEventListener('fetch', (event) => {
   })());
 });
 
-// -- Permitir actualizacion inmediata desde la pagina ---------
+// -- Mensajes desde la pagina ---------------------------------
 self.addEventListener('message', (event) => {
-  if (event.data === 'SKIP_WAITING') self.skipWaiting();
+  const data = event.data;
+  if (data === 'SKIP_WAITING') { self.skipWaiting(); return; }
+  // Descarga de zona del mapa: cachea una lista de tiles y reporta progreso
+  // por el MessagePort (event.ports[0]).
+  if (data && data.type === 'CACHE_TILES' && Array.isArray(data.urls)) {
+    cacheTileList(data.urls, event.ports && event.ports[0]);
+  }
 });
+
+// -- Descargar y cachear una lista de tiles (con progreso) ----
+async function cacheTileList(urls, port) {
+  const cache = await caches.open(TILE_CACHE);
+  const total = urls.length;
+  let done = 0, ok = 0, i = 0;
+  const CONCURRENCY = 6;
+
+  async function worker() {
+    while (i < urls.length) {
+      const url = urls[i++];
+      try {
+        const existing = await cache.match(url);
+        if (existing) {
+          ok++;
+        } else {
+          const res = await fetch(url, { mode: 'no-cors' });
+          if (res && (res.status === 200 || res.type === 'opaque')) {
+            await cache.put(url, res.clone());
+            ok++;
+          }
+        }
+      } catch (e) { /* tile que falla: se omite */ }
+      done++;
+      if (port) port.postMessage({ done, total, ok });
+    }
+  }
+
+  const workers = [];
+  for (let w = 0; w < CONCURRENCY; w++) workers.push(worker());
+  await Promise.all(workers);
+  await trimCache(TILE_CACHE, TILE_MAX);
+  if (port) port.postMessage({ done: total, total, ok, finished: true });
+}
