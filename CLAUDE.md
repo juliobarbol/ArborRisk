@@ -84,7 +84,11 @@ sys.exit(subprocess.run(['node','--check','/tmp/arbor_check.js']).returncode)
 PY
 ```
 
-**Comportamiento:** se puede manejar la app con un navegador headless (puppeteer/chrome-headless-shell) cargando `file://.../index.html`.
+**Comportamiento (navegador headless):** en sesiones de Claude Code on the web, el SessionStart hook (`.claude/hooks/session-start.sh`) deja instalado `chrome-headless-shell` + `puppeteer-core`. Hay un test listo que valida SW real, offline del app-shell, el mecanismo de descarga de zona y la matemática de tiles:
+```bash
+node test/pwa.test.cjs
+```
+Parsea el `CACHE_VERSION` de `sw.js`, así que no hay que tocarlo al subir la versión. _(La network policy del entorno puede bloquear cdnjs/OSM; por eso el test no depende de recursos externos.)_
 
 ## Cosas que NO romper
 - No pasar el JS a módulos ES (rompería los `onclick` globales).
