@@ -7,17 +7,20 @@
 - PWA instalable, **offline-first**, sin login, pensada para usar desde el celular en campo.
 - Los datos (fichas + fotos) viven en **IndexedDB** del dispositivo (`ArborRiskDB`); las preferencias y el borrador en **`localStorage`**. No hay backend.
 - Backup/restore manual vía **JSON** (export/import). Las fotos se resuelven a base64 dentro del JSON para que el backup sea portable.
-- Se va a publicar en **Cloudflare** (mismo esquema que la app de presupuestos: repo en GitHub → Cloudflare despliega solo).
+- Se publica en **Cloudflare** (mismo esquema que la app de presupuestos: repo en GitHub → Cloudflare despliega solo).
 
 ## Arquitectura (importante)
-- **Sin build, sin frameworks: JavaScript vanilla.** Todo el HTML + CSS + JS está en **un único `index.html`** autocontenido.
-- Es una decisión deliberada (simplicidad, deploy de un archivo, offline trivial). No usar bundlers ni frameworks.
+- **Sin build, sin frameworks: JavaScript vanilla.** Todo el HTML + CSS + JS de la app está en **`index.html`**.
+- Es una decisión deliberada (simplicidad, deploy trivial). No usar bundlers ni frameworks.
 - El JS está todo en **un solo `<script>` con ámbito global**: las funciones se llaman entre sí y se usan en `onclick="..."`. **No convertir a módulos ES** sin refactorizar los handlers.
-- **El manifest PWA y el Service Worker se generan inline** (Blob URL) dentro de `setupPWA()` — NO hay archivos `manifest.webmanifest` ni `sw.js` separados, ni iconos `.png` (el icono es un SVG embebido en el manifest).
-- Librerías externas por CDN (cdnjs): **jsPDF**, **Leaflet** + **markercluster**, **qrcodejs**. Requieren conexión la primera vez (no están cacheadas como app shell).
+- **PWA con archivos reales:** el Service Worker (`sw.js`), el manifest (`manifest.webmanifest`) y el icono (`icon.svg`) son **archivos separados** (no se inyectan inline). `setupPWA()` solo registra `./sw.js`. El `<head>` enlaza el manifest y los iconos. _(En el build35 original todo esto era inline vía Blob URL; se extrajo porque registrar un SW desde `blob:` falla en navegadores modernos → no había offline real.)_
+- Librerías externas por CDN (cdnjs): **jsPDF**, **Leaflet** + **markercluster**, **qrcodejs**, y tiles de **OpenStreetMap**. Requieren conexión la primera vez (no están cacheadas como app shell).
 
 ## Estructura de archivos
-- `index.html` — **toda la app** (markup + `<style>` + `<script>`). Único archivo que se despliega.
+- `index.html` — **toda la app** (markup + `<style>` + `<script>`).
+- `sw.js` — Service Worker (offline + actualizaciones). **`CACHE_VERSION` actual: `arborrisk-v3`**.
+- `manifest.webmanifest` — manifest PWA (instalación).
+- `icon.svg` — icono vectorial (usado por el manifest y como `apple-touch-icon`/`favicon`).
 - `CLAUDE.md` — esta guía.
 
 ## Mapa del código dentro de `index.html`
@@ -40,7 +43,7 @@ grep -nE "css/[a-z]+\.css|js/[a-z]+\.js" index.html
 | `js/forms.js` | Formularios de evaluación (carga de la ficha de riesgo) |
 | `js/pdf.js` | Generación de PDF con **jsPDF** (ficha individual y proyecto) |
 | `js/sync.js` | **Export/import JSON** (backup). `exportData`/`resolveForExport`/`blobToDataUrl`, export PDF de proyecto |
-| `js/core.js` | Inicialización (`DOMContentLoaded`), `setupPWA()` (manifest + Service Worker inline), prompt de instalación |
+| `js/core.js` | Inicialización (`DOMContentLoaded`), `setupPWA()` (registra `./sw.js`), prompt de instalación |
 | `js/map.js` | Mapa Leaflet, clustering de marcadores, picker de GPS |
 | `js/projects.js` | Agrupación de fichas por cliente/proyecto |
 | `js/config.js` | Configuración (tema, datos del profesional, etc.) |
@@ -53,14 +56,16 @@ grep -nE "css/[a-z]+\.css|js/[a-z]+\.js" index.html
 - **Niveles de riesgo:** bajo / moderado / alto, con colores en variables CSS (`--low`, `--mod`, `--high`).
 
 ## PWA / Service Worker (detalles que no romper)
-- El SW y el manifest se inyectan en `setupPWA()` (sección `js/core.js`). El `CACHE_VERSION` actual es **`arborrisk-v2`** (variable dentro de `setupPWA`).
-- **Para forzar actualización tras un deploy: subir el `CACHE_VERSION`** (formato `arborrisk-vNN`), igual que en presupuestos.
-- `start_url` y el scope son `'.'` (raíz). El SW cachea el documento y sirve offline-first. Las libs por CDN no están en el app shell.
+- El SW es un archivo real: **`sw.js`**. `CACHE_VERSION` actual: **`arborrisk-v3`** (constante arriba de `sw.js`). Estrategia: **network-first** en navegaciones (con timeout y fallback a caché) + **cache-first** en el resto del mismo origen. Mismo patrón que el `sw.js` de presupuestos.
+- `APP_SHELL` (en `sw.js`) precachea `./`, `./index.html`, `./manifest.webmanifest`, `./icon.svg`. **Si agregás un archivo local nuevo, sumalo a `APP_SHELL`** o se rompe el offline.
+- Las libs por CDN (jsPDF, Leaflet, QR) y los tiles de OSM son **cross-origin**: el SW las deja pasar directo a la red (no se cachean) → la primera vez requieren conexión.
+- `start_url` `./index.html`, scope `./` (en `manifest.webmanifest`).
 
 ## Flujo de despliegue (SEGUIR SIEMPRE)
 1. Desarrollar en la rama de trabajo (`claude/...`), no en `main`.
-2. **Subir `CACHE_VERSION`** en `setupPWA()` en cada cambio que se despliegue (si no, los dispositivos siguen con la versión vieja en caché). Formato: `arborrisk-vNN`.
-3. Mergear a `main` → Cloudflare despliega solo (mismo esquema que presupuestos).
+2. **Subir `CACHE_VERSION` en `sw.js`** en cada cambio que se despliegue (si no, los dispositivos siguen con la versión vieja en caché). Formato: `arborrisk-vNN`.
+3. Si agregás un archivo local nuevo (otro `.js`, `.css`, icono), **agregarlo a `APP_SHELL` en `sw.js`** o se rompe el offline.
+4. Mergear a `main` → Cloudflare despliega solo (mismo esquema que presupuestos).
 
 ## Cómo verificar cambios (sin romper)
 **Sintaxis JS** — aislar el `<script>` inline y verificar con node:
@@ -78,6 +83,6 @@ PY
 
 ## Cosas que NO romper
 - No pasar el JS a módulos ES (rompería los `onclick` globales).
-- No separar el archivo: la app es **un único `index.html`** por diseño.
-- No olvidar subir `CACHE_VERSION` al desplegar.
+- No olvidar subir `CACHE_VERSION` en `sw.js` al desplegar.
+- No volver a inyectar el SW inline desde `blob:` (no registra → sin offline).
 - No mover los datos de IndexedDB a localStorage (riesgo de cuota y pérdida de fotos).
