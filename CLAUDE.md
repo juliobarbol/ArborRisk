@@ -110,9 +110,15 @@ Cada módulo arranca con un marcador `/* js/nombre.js */`. Saltá directo al ran
 ## Flujo de despliegue (SEGUIR SIEMPRE)
 
 1. Desarrollar en la rama de trabajo (`claude/...`), no en `main`.
-2. **Subir `CACHE_VERSION` en `sw.js`** en cada cambio que se despliegue. Formato: `arborrisk-vNN`. **No hay workflow automático**: hay que hacerlo a mano siempre.
+2. Mergear a `main` → el workflow **`.github/workflows/stamp-sw.yml`** corre `build.py`
+   automáticamente y estampa `CACHE_VERSION` con timestamp. **No hace falta bump manual.**
+   Red de seguridad: si ya viene estampado, no commitea nada.
 3. Si agregás un archivo local nuevo, **sumarlo a `APP_SHELL` en `sw.js`** o se rompe el offline.
-4. Mergear a `main` → Cloudflare despliega solo.
+4. También podés correr `python build.py` a mano si necesitás forzar el bump antes de mergear.
+
+### `build.py` y `.assetsignore`
+- `build.py` reescribe la línea `const CACHE_VERSION = '...';` de `sw.js` con `arborrisk-<timestamp UTC>`.
+- `.assetsignore` excluye `wrangler.jsonc`, `.assetsignore`, `build.py` y `CLAUDE.md` del deploy a Cloudflare.
 
 ## Cómo verificar cambios (sin romper)
 
@@ -135,7 +141,7 @@ node test/pwa.test.cjs
 ## Cosas que NO romper
 
 - No pasar el JS a módulos ES (rompería los `onclick` globales).
-- No olvidar subir `CACHE_VERSION` en `sw.js` al desplegar (**manual**, no hay workflow automático).
+- No olvidar que `build.py` / el workflow estampa `CACHE_VERSION` automáticamente — no tocar ese valor a mano.
 - No volver a inyectar el SW inline desde `blob:` (no registra → sin offline).
 - No mover los datos de IndexedDB a localStorage (riesgo de cuota y pérdida de fotos).
 

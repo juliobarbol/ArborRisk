@@ -20,7 +20,8 @@ Tenés autorización permanente de Julio para:
 
 1. Implementar el cambio completo.
 2. Commitear con mensajes claros.
-3. **Subir `CACHE_VERSION` en `sw.js`** (no hay workflow automático; hacerlo siempre antes del merge).
+3. **`CACHE_VERSION` se estampa solo**: el workflow `.github/workflows/stamp-sw.yml` corre `build.py`
+   en cada push a `main` y lo actualiza automáticamente. No hace falta bump manual.
 4. **Mergear directo a `main` y pushear**, sin preguntar y sin crear PRs
    (PR solo si Julio lo pide explícitamente).
 5. Si un push falla por red, reintentar hasta 4 veces con espera creciente
@@ -46,18 +47,15 @@ El control de calidad sos vos:
 4. Cambios visuales: no podés verlos corriendo la app en esta sesión; sé
    conservador y no reestructures más de lo pedido.
 
-## Antes de mergear: subir CACHE_VERSION
+## Versionado del cache: automático
 
-**Siempre** que se vaya a mergear a `main`:
+Al hacer push a `main`, el workflow `.github/workflows/stamp-sw.yml` corre
+`build.py` y reescribe `const CACHE_VERSION` en `sw.js` con un timestamp.
+**No hace falta hacer nada a mano.** Si el sw.js ya venía estampado, el
+workflow no commitea nada (es idempotente).
 
-1. Buscá `CACHE_VERSION` en `sw.js`.
-2. Incrementá el número: `arborrisk-vNN` → `arborrisk-v(NN+1)`.
-3. Commiteá el cambio junto con lo demás (o en un commit separado si ya
-   tenés commits previos).
-
-**No hay workflow que lo haga automáticamente.** Si se olvida, los usuarios
-siguen viendo la versión vieja aunque el `index.html` ya se actualizó en
-Cloudflare.
+Verificación post-merge: después de ~1–2 minutos podés hacer `git pull` y
+confirmar que `CACHE_VERSION` tiene el timestamp del último push.
 
 ## Después de mergear
 
