@@ -57,6 +57,29 @@ workflow no commitea nada (es idempotente).
 Verificación post-merge: después de ~1–2 minutos podés hacer `git pull` y
 confirmar que `CACHE_VERSION` tiene el timestamp del último push.
 
+### Si el repo no tiene el estampado automático todavía
+
+Chequeá al inicio de la sesión:
+
+```bash
+ls build.py .github/workflows/stamp-sw.yml 2>/dev/null
+```
+
+Si alguno falta, agregalo **junto con el primer cambio** que vayas a publicar
+(no hace falta una sesión aparte). Los archivos a crear son:
+
+- **`build.py`**: busca `const CACHE_VERSION = '...';` en `sw.js` y lo
+  reemplaza con `<nombre-app>-<timestamp UTC>`. El nombre sale de
+  `wrangler.jsonc`. Modelo en StockMerger/ArborRisk.
+- **`.github/workflows/stamp-sw.yml`**: corre `build.py` en cada push a
+  `main` y commitea si cambió. Guard `[skip stamp]` en el mensaje evita
+  loops. Modelo en StockMerger/ArborRisk.
+- **`.assetsignore`** (si no existe): excluir `build.py`, `CLAUDE.md`,
+  `wrangler.jsonc` para que no se publiquen en Cloudflare.
+
+Una vez que existe el workflow, nunca más hace falta acordarse de subir
+la versión a mano.
+
 ## Después de mergear
 
 1. Decile a Julio qué mirar en la app publicada para confirmar que el cambio
