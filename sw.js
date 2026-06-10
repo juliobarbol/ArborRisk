@@ -17,7 +17,7 @@
 //
 //  Para forzar actualizacion tras un deploy: subir el CACHE_VERSION.
 
-const CACHE_VERSION = 'arborrisk-20260610-220100';
+const CACHE_VERSION = 'arborrisk-20260610-221805';
 const RUNTIME_CACHE = CACHE_VERSION + '-cdn';    // libs + fuentes
 const TILE_CACHE    = CACHE_VERSION + '-tiles';  // tiles OSM (con tope)
 const CURRENT_CACHES = [CACHE_VERSION, RUNTIME_CACHE, TILE_CACHE];
