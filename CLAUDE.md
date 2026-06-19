@@ -67,10 +67,27 @@ grep -nE "css/[a-z]+\.css|js/[a-z]+\.js" index.html
 - `start_url` `./index.html`, scope `./` (en `manifest.webmanifest`).
 
 ## Flujo de despliegue (SEGUIR SIEMPRE)
+
+> **Para desplegar cualquier cambio a producción: mergear la rama de trabajo a
+> `main`. Cloudflare detecta el push y despliega automáticamente — no hay
+> ningún paso manual extra.** Los usuarios con la app instalada reciben la
+> versión nueva la próxima vez que abran la app con conexión.
+
 1. Desarrollar en la rama de trabajo (`claude/...`), no en `main`.
 2. **Subir `CACHE_VERSION` en `sw.js`** en cada cambio que se despliegue (si no, los dispositivos siguen con la versión vieja en caché). Formato: `arborrisk-vNN`.
 3. Si agregás un archivo local nuevo (otro `.js`, `.css`, icono), **agregarlo a `APP_SHELL` en `sw.js`** o se rompe el offline.
-4. Mergear a `main` → Cloudflare despliega solo (mismo esquema que presupuestos).
+4. **Mergear a `main`** → Cloudflare despliega solo (mismo esquema que presupuestos).
+
+> **Instrucción de flujo de trabajo:** Al terminar cada función o cambio,
+> **mergear inmediatamente a `main`** sin esperar que el usuario lo pida.
+> El usuario prueba la app directamente en producción después de cada merge.
+
+> **AUTORIZACIÓN PERMANENTE (deploy):** El usuario (juliobarribolbo@gmail.com,
+> dueño del repo) autoriza de forma permanente y explícita **mergear la rama de
+> trabajo (`claude/...`) a `main` y pushear `main`** automáticamente al terminar
+> cada cambio ya verificado (sintaxis JS + `test/pwa.test.cjs` OK), **sin volver
+> a preguntar**. Esto cubre el deploy a producción vía Cloudflare. (No incluye
+> crear Pull Requests: eso sigue requiriendo pedido explícito.)
 
 ## Cómo verificar cambios (sin romper)
 **Sintaxis JS** — aislar el `<script>` inline y verificar con node:
