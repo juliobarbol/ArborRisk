@@ -7,6 +7,7 @@
 - PWA instalable, **offline-first**, sin login, pensada para usar desde el celular en campo.
 - Los datos (fichas + fotos) viven en **IndexedDB** del dispositivo (`ArborRiskDB`); las preferencias y el borrador en **`localStorage`**. No hay backend.
 - Backup/restore manual vía **JSON** (export/import). Las fotos se resuelven a base64 dentro del JSON para que el backup sea portable.
+- **Backup automático opcional a Google Drive** (scope `drive.appdata`, mismo patrón que la app de presupuestos). Opt-in, inerte hasta cargar el `CLIENT_ID`. Ver sección "Módulo GDRIVE".
 - Se publica en **Cloudflare** (mismo esquema que la app de presupuestos: repo en GitHub → Cloudflare despliega solo).
 
 ## Arquitectura (importante)
@@ -18,7 +19,7 @@
 
 ## Estructura de archivos
 - `index.html` — **toda la app** (markup + `<style>` + `<script>`).
-- `sw.js` — Service Worker (offline + actualizaciones). **`CACHE_VERSION` actual: `arborrisk-v5`**.
+- `sw.js` — Service Worker (offline + actualizaciones). **`CACHE_VERSION` actual: `arborrisk-v6`**.
 - `manifest.webmanifest` — manifest PWA (instalación).
 - `icon.svg` — icono vectorial (usado por el manifest y como `apple-touch-icon`/`favicon`).
 - `CLAUDE.md` — esta guía.
@@ -43,6 +44,7 @@ grep -nE "css/[a-z]+\.css|js/[a-z]+\.js" index.html
 | `js/forms.js` | Formularios de evaluación (carga de la ficha de riesgo) |
 | `js/pdf.js` | Generación de PDF con **jsPDF** (ficha individual y proyecto) |
 | `js/sync.js` | **Export/import JSON** (backup). `exportData`/`resolveForExport`/`blobToDataUrl`, export PDF de proyecto |
+| `js/gdrive.js` | **Backup automático a Google Drive** (`drive.appdata`). Builder/apply compartidos (`buildArborBackupObject`/`applyArborBackupObject`/`resolveAllRecordsForExport`) + módulo `GDRIVE` (conectar/restaurar/auto-subida) |
 | `js/core.js` | Inicialización (`DOMContentLoaded`), `setupPWA()` (registra `./sw.js`), prompt de instalación |
 | `js/map.js` | Mapa Leaflet, clustering de marcadores, picker de GPS, **descarga de zona offline** (`downloadMapArea`/`runTileDownload`/`lngLatToTile`) |
 | `js/projects.js` | Agrupación de fichas por cliente/proyecto |
@@ -55,8 +57,16 @@ grep -nE "css/[a-z]+\.css|js/[a-z]+\.js" index.html
 - **XSS:** escapar SIEMPRE los datos del usuario antes de meterlos en `innerHTML` (varios render usan `.replace(/"/g,'&quot;')` y similares — mantener el patrón).
 - **Niveles de riesgo:** bajo / moderado / alto, con colores en variables CSS (`--low`, `--mod`, `--high`).
 
+## Módulo GDRIVE (detalles que no romper)
+- **Opt-in e inerte por defecto:** con `GDRIVE.CLIENT_ID` vacío, `gdriveConfigured()` es `false` y la sección ni aparece. Para activarlo: pegar el **OAuth Client ID** (público; el `client_secret` NO va al repo) en `GDRIVE.CLIENT_ID` y autorizar el origen de ArborRisk en Google Cloud Console. Scope `drive.appdata` (carpeta privada por app; el usuario solo ve sus datos).
+- **NO pide login al abrir:** `gdriveInitOnLoad()` solo intenta recuperar de Drive si el dispositivo está **vacío** y figura conectado (teléfono nuevo/reinstalado), en silencio con la cuenta recordada. Si ya hay fichas locales, no toca nada → offline intacto, cero pedidos de login al trabajar.
+- **Token silencioso:** `gdriveGetToken()` usa **`login_hint`** (NO `hint`) con el email guardado (`arborrisk_gdrive_email`) y `prompt:'none'` en segundo plano. `{ interactive:true }` solo desde botones que el usuario toca (conectar/restaurar).
+- **Auto-backup:** `dbPut`/`dbDelete` llaman a `_afterDataChange()` → `scheduleGdriveBackup()` (debounce 45 s). Durante restauraciones masivas se setea `window._suspendGdriveBackup` para no re-subir lo recién bajado. `setupGdriveListeners()` sube lo pendiente en `online` y `visibilitychange`.
+- **Claves LS:** `arborrisk_gdrive_on` / `arborrisk_gdrive_last` / `arborrisk_gdrive_email`. Archivo en Drive: `arborrisk-backup.json` (formato = payload de exportación de campo: `{_arborrisk_export, records, _proyecto, _deviceId, …}`).
+- UI en el modal de Sincronización (`#sync-modal`, sección `#gdrive-section`); `gdriveUpdateUI()` refresca estado y se llama al abrir el modal.
+
 ## PWA / Service Worker (detalles que no romper)
-- El SW es un archivo real: **`sw.js`**. `CACHE_VERSION` actual: **`arborrisk-v5`** (constante arriba de `sw.js`). Estrategia: **network-first** en navegaciones (con timeout y fallback a caché) + **cache-first** en el resto del mismo origen. Mismo patrón que el `sw.js` de presupuestos.
+- El SW es un archivo real: **`sw.js`**. `CACHE_VERSION` actual: **`arborrisk-v6`** (constante arriba de `sw.js`). Estrategia: **network-first** en navegaciones (con timeout y fallback a caché) + **cache-first** en el resto del mismo origen. Mismo patrón que el `sw.js` de presupuestos.
 - `APP_SHELL` (en `sw.js`) precachea `./`, `./index.html`, `./manifest.webmanifest`, `./icon.svg`. **Si agregás un archivo local nuevo, sumalo a `APP_SHELL`** o se rompe el offline.
 - **Cacheo de CDN (offline total):** el SW cachea cross-origin con **cache-first**:
   - `CDN_HOSTS` (`cdnjs.cloudflare.com`, `fonts.googleapis.com`, `fonts.gstatic.com`) → cache `…-cdn`. Cubre jsPDF, Leaflet, markercluster, QR y las fuentes. Se cachean **en la primera carga online**; después funcionan offline.

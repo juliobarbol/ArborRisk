@@ -1967,6 +1967,21 @@
         ♻️ Restaurar backup completo
       </button>
 
+      <!-- Copia automática en Google Drive. Oculta hasta que el dueño configure el Client ID (gdriveUpdateUI). -->
+      <div id="gdrive-section" style="display:none;margin-top:6px;border-top:2px solid var(--border);padding-top:10px">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:2px">☁️ Google Drive</div>
+        <p id="gdrive-status" style="font-family:var(--mono);font-size:10px;color:var(--text3);line-height:1.5;margin:2px 0 8px">Guardá una copia automática de todos tus datos en tu Google Drive, para no perderlos si cambiás o perdés el teléfono.</p>
+        <button type="button" id="gdrive-connect" class="btn-save" style="justify-content:flex-start;gap:10px;font-size:12px;background:#1a73e8;border-color:#1a73e8" onclick="gdriveConnect()">
+          ☁️ Conectar Google Drive
+        </button>
+        <button type="button" id="gdrive-restore" class="btn-save" style="display:none;justify-content:flex-start;gap:10px;font-size:12px;background:var(--surface2);color:var(--text2);border:2px solid var(--border)" onclick="gdriveRestore();closeSyncMenu()">
+          ⬇️ Restaurar desde Drive
+        </button>
+        <button type="button" id="gdrive-disconnect" class="btn-save" style="display:none;justify-content:flex-start;gap:10px;font-size:12px;background:var(--surface2);color:var(--text3);border:2px solid var(--border);margin-top:6px" onclick="gdriveDisconnect()">
+          🔌 Desconectar
+        </button>
+      </div>
+
     </div>
     <div style="padding:10px 16px;border-top:2px solid var(--border)">
       <button type="button" class="btn-cancel" style="width:100%" onclick="closeSyncMenu()">Cerrar</button>
@@ -2274,10 +2289,20 @@ function dbPut(record) {
     try {
       var tx  = db.transaction(STORE, 'readwrite');
       var req = tx.objectStore(STORE).put(record);
-      req.onsuccess = function() { res(); };
+      req.onsuccess = function() { _afterDataChange(); res(); };
       req.onerror   = function() { rej(req.error); };
     } catch(e) { rej(e); }
   });
+}
+
+// Punto central tras cada escritura de una ficha: dispara (con retardo) la
+// copia automática a Drive. Inerte si Drive no está configurado/conectado, y
+// se suspende durante restauraciones masivas (no re-subir lo recién bajado).
+function _afterDataChange() {
+  try {
+    if (window._suspendGdriveBackup) return;
+    if (typeof scheduleGdriveBackup === 'function') scheduleGdriveBackup();
+  } catch(_) {}
 }
 
 function dbDelete(id) {
@@ -2286,7 +2311,7 @@ function dbDelete(id) {
     try {
       var tx  = db.transaction(STORE, 'readwrite');
       var req = tx.objectStore(STORE).delete(id);
-      req.onsuccess = function() { res(); };
+      req.onsuccess = function() { _afterDataChange(); res(); };
       req.onerror   = function() { rej(req.error); };
     } catch(e) { rej(e); }
   });
@@ -3262,6 +3287,8 @@ async function init() {
   updateHeaderInspector();
   checkDraft();
   setupPWA();
+  setupGdriveListeners();
+  gdriveInitOnLoad();
 }
 
 // ============================================================
@@ -5435,27 +5462,9 @@ function importData(input) {
     showConfirm('¿Importar datos?', 'Esto reemplazará todos los registros actuales con los del archivo importado. Esta acción no se puede deshacer.', async () => {
       try {
         const parsed = JSON.parse(e.target.result);
-        const imported = Array.isArray(parsed) ? parsed : (parsed.records || []);
-        if (!imported.length) { showToast('El archivo no contiene registros', 'error'); return; }
-        await dbClear();
-        for (const rec of imported) {
-          if (rec && rec.id) await dbPut(rec);
-        }
-        records = imported.filter(r => r && r.id);
-        await migratePhotosToIDB();
-        await cleanupOrphanPhotos();
-        // Rebuild autocomplete
-        try { localStorage.removeItem('arborrisk_ac_especies'); } catch(e) {}
-        try { localStorage.removeItem('arborrisk_ac_clientes'); } catch(e) {}
-        records.forEach(function(r) {
-          saveAutocompleteValue('especies', r.especie);
-          saveAutocompleteValue('clientes', r.cliente);
-        });
-        applyFilters(); updateStorage();
-        if (currentTab === 'proyectos') renderProjects();
-        if (currentTab === 'mapa') renderMap();
-        if (currentTab === 'catastro') renderCatastro();
-        showToast(records.length + ' registros importados correctamente', 'success');
+        const n = await applyArborBackupObject(parsed);
+        if (!n) { showToast('El archivo no contiene registros', 'error'); return; }
+        showToast(n + ' registros importados correctamente', 'success');
       } catch(err) {
         console.error('importData error:', err);
         showToast('Archivo inválido — verificá que sea un backup de ArborRisk', 'error');
@@ -5469,6 +5478,358 @@ function importData(input) {
 
 // ============================================================
 // CONFIRM + TOAST
+
+</script>
+<script>
+/* js/gdrive.js */
+// ============================================================
+// BACKUP: builder/apply compartidos (export de campo + Drive)
+// ============================================================
+// Resuelve TODOS los registros con sus fotos en base64, para un backup
+// portable (mismo criterio que la exportación de campo). Async porque las
+// fotos viven en IndexedDB.
+async function resolveAllRecordsForExport() {
+  var out = [];
+  for (var i = 0; i < records.length; i++) {
+    var r = Object.assign({}, records[i]);
+    r.photos = await resolveForExport(r.photos);
+    if (r.registroPhotos) {
+      r.registroPhotos = await Promise.all(r.registroPhotos.map(async function(p) {
+        var resolved = await resolveForExport([p.id]);
+        return { id: resolved[0] || p.id, caption: p.caption };
+      }));
+    }
+    if (r.evaluaciones && r.evaluaciones.length) {
+      var evs = [];
+      for (var j = 0; j < r.evaluaciones.length; j++) {
+        var ev = Object.assign({}, r.evaluaciones[j]);
+        ev.photos = await resolveForExport(ev.photos);
+        evs.push(ev);
+      }
+      r.evaluaciones = evs;
+    }
+    out.push(r);
+  }
+  return out;
+}
+
+// Objeto de backup completo (mismo formato que la exportación de campo).
+async function buildArborBackupObject() {
+  var cfg = (typeof getInspectorConfig === 'function') ? getInspectorConfig() : {};
+  return {
+    _arborrisk_export: true,
+    _version: 1,
+    _exportedAt: new Date().toISOString(),
+    _inspector: cfg.nombre || 'Sin nombre',
+    _iniciales: cfg.iniciales || '',
+    _proyecto: cfg.proyecto || '',
+    _deviceId: (typeof getDeviceId === 'function') ? getDeviceId() : '',
+    records: await resolveAllRecordsForExport()
+  };
+}
+
+// Aplica un backup (array legacy o payload {records}) reemplazando los datos
+// del dispositivo. Devuelve la cantidad de registros aplicados (0 = inválido).
+// Suspende el auto-backup mientras escribe para no re-subir lo recién bajado.
+async function applyArborBackupObject(parsed) {
+  var imported = Array.isArray(parsed) ? parsed : ((parsed && parsed.records) || []);
+  imported = imported.filter(function(r) { return r && r.id; });
+  if (!imported.length) return 0;
+  window._suspendGdriveBackup = true;
+  try {
+    await dbClear();
+    for (var i = 0; i < imported.length; i++) { await dbPut(imported[i]); }
+    records = imported;
+    await migratePhotosToIDB();
+    await cleanupOrphanPhotos();
+    try { localStorage.removeItem('arborrisk_ac_especies'); } catch(e) {}
+    try { localStorage.removeItem('arborrisk_ac_clientes'); } catch(e) {}
+    records.forEach(function(r) {
+      saveAutocompleteValue('especies', r.especie);
+      saveAutocompleteValue('clientes', r.cliente);
+    });
+    applyFilters(); updateStorage();
+    if (currentTab === 'proyectos') renderProjects();
+    if (currentTab === 'mapa') renderMap();
+    if (currentTab === 'catastro') renderCatastro();
+  } finally {
+    window._suspendGdriveBackup = false;
+  }
+  return records.length;
+}
+
+// ============================================================
+// GDRIVE.JS — Copia de seguridad automática en Google Drive
+// ============================================================
+// Guarda un único archivo de backup en la carpeta privada de la app
+// (scope drive.appdata): el usuario solo ve sus propios datos, y nadie más
+// accede. Sube automáticamente mientras la app está abierta. Mismo patrón
+// que la app de presupuestos.
+//
+// ⚠️ Para activarlo: pegá tu OAuth Client ID de Google en CLIENT_ID.
+//    Mientras esté vacío, la función queda inactiva y la sección ni aparece.
+const GDRIVE = {
+  CLIENT_ID: '',  // OAuth Client ID de Google (público; el secret NO se usa ni se guarda)
+  SCOPE: 'https://www.googleapis.com/auth/drive.appdata',
+  FILE: 'arborrisk-backup.json',
+  _gisPromise: null, _tokenClient: null,
+  _token: null, _tokenExp: 0, _pending: null, _timer: null, _dirty: false,
+};
+const GDRIVE_LS = { ON: 'arborrisk_gdrive_on', LAST: 'arborrisk_gdrive_last', EMAIL: 'arborrisk_gdrive_email' };
+
+function gdriveConfigured(){ return !!(GDRIVE.CLIENT_ID && GDRIVE.CLIENT_ID.indexOf('.apps.googleusercontent.com') > 0); }
+function gdriveConnected(){ try { return localStorage.getItem(GDRIVE_LS.ON) === '1'; } catch(_){ return false; } }
+
+// Carga la librería de Google Identity Services (una sola vez).
+function loadGIS(){
+  if (window.google && google.accounts && google.accounts.oauth2) return Promise.resolve();
+  if (GDRIVE._gisPromise) return GDRIVE._gisPromise;
+  GDRIVE._gisPromise = new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client'; s.async = true; s.defer = true;
+    s.onload = () => res();
+    s.onerror = () => { GDRIVE._gisPromise = null; rej(new Error('No se pudo cargar Google')); };
+    document.head.appendChild(s);
+  });
+  return GDRIVE._gisPromise;
+}
+
+async function gdriveEnsureClient(){
+  await loadGIS();
+  if (!GDRIVE._tokenClient) {
+    GDRIVE._tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: GDRIVE.CLIENT_ID,
+      scope: GDRIVE.SCOPE,
+      callback: (resp) => {
+        const p = GDRIVE._pending; GDRIVE._pending = null;
+        if (resp && resp.access_token) {
+          GDRIVE._token = resp.access_token;
+          GDRIVE._tokenExp = Date.now() + ((resp.expires_in || 3500) * 1000);
+          if (p) p.resolve(resp.access_token);
+        } else if (p) { p.reject(new Error((resp && resp.error) || 'sin_token')); }
+      },
+    });
+  }
+}
+
+// Obtiene un access token.
+//  • Por defecto SILENCIOSO: usa el email guardado como login_hint para que
+//    Google renueve sin mostrar el selector. Si no puede, rechaza sin molestar.
+//  • { interactive: true } (solo desde botones que el usuario toca) permite
+//    mostrar el selector/consentimiento la primera vez.
+function gdriveGetToken(opts){
+  opts = opts || {};
+  const interactive = !!opts.interactive;
+  return new Promise((resolve, reject) => {
+    if (GDRIVE._token && Date.now() < GDRIVE._tokenExp - 60000) { resolve(GDRIVE._token); return; }
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) { reject(new Error('offline')); return; }
+    gdriveEnsureClient().then(() => {
+      GDRIVE._pending = { resolve, reject };
+      let hint = ''; try { hint = localStorage.getItem(GDRIVE_LS.EMAIL) || ''; } catch(_){}
+      const req = {};
+      // ⚠️ El campo de GIS es login_hint (NO hint, que GIS ignora). Con varias
+      // cuentas abiertas, ESTO evita el selector: le decimos a Google qué cuenta.
+      if (hint) req.login_hint = hint;
+      if (interactive) {
+        req.prompt = hint ? '' : 'consent';
+      } else {
+        req.prompt = 'none';
+      }
+      GDRIVE._tokenClient.requestAccessToken(req);
+    }).catch(reject);
+  });
+}
+
+// Lee el email de la cuenta conectada y lo guarda como hint para renovar callado.
+async function gdriveRememberEmail(token){
+  try {
+    const r = await fetch('https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)', {
+      headers: { Authorization: 'Bearer ' + token } });
+    if (!r.ok) return;
+    const j = await r.json();
+    const email = j && j.user && j.user.emailAddress;
+    if (email) { try { localStorage.setItem(GDRIVE_LS.EMAIL, email); } catch(_){} }
+  } catch(_){ /* sin email: seguimos sin hint */ }
+}
+
+async function gdriveFindFile(token){
+  const q = encodeURIComponent(`name='${GDRIVE.FILE}'`);
+  const url = `https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${q}&fields=files(id,modifiedTime)`;
+  const r = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
+  if (!r.ok) throw new Error('Drive list ' + r.status);
+  const j = await r.json();
+  return (j.files && j.files[0]) || null;
+}
+
+// Sube el backup actual (crea o actualiza el único archivo).
+async function gdriveUpload(){
+  const token = await gdriveGetToken();
+  const body = JSON.stringify(await buildArborBackupObject());
+  const existing = await gdriveFindFile(token);
+  if (existing) {
+    const r = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${existing.id}?uploadType=media`, {
+      method: 'PATCH', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body });
+    if (!r.ok) throw new Error('Drive update ' + r.status);
+  } else {
+    const boundary = '----arbor' + Date.now();
+    const meta = JSON.stringify({ name: GDRIVE.FILE, parents: ['appDataFolder'] });
+    const multipart =
+      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n` +
+      `--${boundary}\r\nContent-Type: application/json\r\n\r\n${body}\r\n--${boundary}--`;
+    const r = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+      method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': `multipart/related; boundary=${boundary}` }, body: multipart });
+    if (!r.ok) throw new Error('Drive create ' + r.status);
+  }
+  GDRIVE._dirty = false;
+  try { localStorage.setItem(GDRIVE_LS.LAST, new Date().toISOString()); } catch(_){}
+}
+
+// Descarga el objeto de backup de Drive (o null si no hay).
+async function gdriveDownload(){
+  const token = await gdriveGetToken();
+  const f = await gdriveFindFile(token);
+  if (!f) return null;
+  const r = await fetch(`https://www.googleapis.com/drive/v3/files/${f.id}?alt=media`, { headers: { Authorization: 'Bearer ' + token } });
+  if (!r.ok) throw new Error('Drive get ' + r.status);
+  return await r.json();
+}
+
+// Botón "Conectar": inicia sesión y, si el equipo está vacío y hay copia en
+// Drive, ofrece recuperarla (en vez de pisarla con datos vacíos).
+async function gdriveConnect(){
+  if (!gdriveConfigured()) { showToast('Google Drive no está configurado todavía', 'error'); return; }
+  try {
+    showToast('Conectando con Google Drive…');
+    const token = await gdriveGetToken({ interactive: true });
+    try { localStorage.setItem(GDRIVE_LS.ON, '1'); } catch(_){}
+    await gdriveRememberEmail(token);
+    const localEmpty = !(records && records.length);
+    let remote = null;
+    try { remote = await gdriveDownload(); } catch(_){}
+    const remoteRecords = remote && (Array.isArray(remote) ? remote : remote.records);
+    if (remoteRecords && remoteRecords.length && localEmpty) {
+      showConfirm('Recuperar datos', 'Hay una copia en tu Google Drive. ¿Querés recuperarla en este dispositivo?', async () => {
+        if (await applyArborBackupObject(remote)) showToast('✅ Datos recuperados desde Drive', 'success');
+        gdriveUpdateUI();
+      });
+      return;
+    }
+    await gdriveUpload();
+    showToast('✅ Conectado. Tus datos se copian solos en tu Drive', 'success');
+  } catch(e){
+    console.error('gdriveConnect', e);
+    try { localStorage.removeItem(GDRIVE_LS.ON); } catch(_){}
+    showToast('No se pudo conectar con Google Drive', 'error');
+  }
+  gdriveUpdateUI();
+}
+
+function gdriveDisconnect(){
+  try { if (GDRIVE._token && window.google && google.accounts && google.accounts.oauth2) google.accounts.oauth2.revoke(GDRIVE._token, ()=>{}); } catch(_){}
+  GDRIVE._token = null; GDRIVE._tokenExp = 0;
+  try { localStorage.removeItem(GDRIVE_LS.ON); } catch(_){}
+  try { localStorage.removeItem(GDRIVE_LS.EMAIL); } catch(_){}
+  gdriveUpdateUI();
+  showToast('Google Drive desconectado');
+}
+
+function gdriveRestore(){
+  if (!gdriveConfigured()) return;
+  showConfirm('Restaurar desde Drive', '¿Traer la copia guardada en Google Drive? Reemplazará los datos actuales de este dispositivo.', async () => {
+    try {
+      showToast('Descargando copia…');
+      const token = await gdriveGetToken({ interactive: true });
+      await gdriveRememberEmail(token);
+      const d = await gdriveDownload();
+      if (!d) { showToast('Todavía no hay ninguna copia en tu Drive', 'error'); return; }
+      if (await applyArborBackupObject(d)) showToast('✅ Datos restaurados desde Google Drive', 'success');
+      else showToast('La copia de Drive no tiene un formato válido', 'error');
+    } catch(e){ console.error('gdriveRestore', e); showToast('No se pudo restaurar desde Drive', 'error'); }
+    gdriveUpdateUI();
+  });
+}
+
+// Copia automática: se dispara (con retardo) tras cada cambio guardado.
+function scheduleGdriveBackup(){
+  if (!gdriveConfigured() || !gdriveConnected()) return;
+  GDRIVE._dirty = true;
+  clearTimeout(GDRIVE._timer);
+  GDRIVE._timer = setTimeout(() => {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    gdriveUpload().then(gdriveUpdateUI).catch(e => console.warn('auto-backup Drive falló', e));
+  }, 45000);
+}
+
+function _fmtBackupDate(iso){
+  try { const d = new Date(iso); const p = n => String(n).padStart(2,'0');
+    return `${p(d.getDate())}/${p(d.getMonth()+1)} ${p(d.getHours())}:${p(d.getMinutes())}`; }
+  catch(_){ return ''; }
+}
+
+// Refresca el estado visible de la sección de Drive (en el modal de sync).
+function gdriveUpdateUI(){
+  const sec = document.getElementById('gdrive-section'); if (!sec) return;
+  const status = document.getElementById('gdrive-status');
+  const cBtn = document.getElementById('gdrive-connect');
+  const rBtn = document.getElementById('gdrive-restore');
+  const dBtn = document.getElementById('gdrive-disconnect');
+  if (!gdriveConfigured()) { sec.style.display = 'none'; return; }
+  sec.style.display = '';
+  const on = gdriveConnected();
+  if (cBtn) cBtn.style.display = on ? 'none' : '';
+  if (rBtn) rBtn.style.display = on ? '' : 'none';
+  if (dBtn) dBtn.style.display = on ? '' : 'none';
+  if (status) {
+    if (on) {
+      let last = ''; try { last = localStorage.getItem(GDRIVE_LS.LAST) || ''; } catch(_){}
+      status.textContent = last
+        ? ('Conectado ✓ · Última copia: ' + _fmtBackupDate(last))
+        : 'Conectado ✓ · Tus datos se copian automáticamente en tu Google Drive.';
+    } else {
+      status.textContent = 'Guardá una copia automática de todos tus datos en tu Google Drive, para no perderlos si cambiás o perdés el teléfono.';
+    }
+  }
+}
+
+// Al arrancar. NO pedimos token al abrir si ya hay datos locales (caso normal):
+// cero pedidos de login y modo offline intacto. Solo si el equipo está VACÍO
+// pero figura como conectado (teléfono nuevo / reinstalado) intentamos —en
+// silencio, con la cuenta recordada— recuperar la copia de Drive.
+function gdriveInitOnLoad(){
+  if (!gdriveConfigured()) { gdriveUpdateUI(); return; }
+  gdriveUpdateUI();
+  if (!gdriveConnected()) return;
+  if (records && records.length) return;
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+  gdriveGetToken({ interactive: false }).then(async (token) => {
+    gdriveUpdateUI();
+    try {
+      await gdriveRememberEmail(token);
+      const d = await gdriveDownload();
+      const dRecords = d && (Array.isArray(d) ? d : d.records);
+      if (dRecords && dRecords.length) {
+        showConfirm('Recuperar datos', 'Encontramos una copia en tu Google Drive. ¿Querés recuperar tus fichas en este dispositivo?', async () => {
+          if (await applyArborBackupObject(d)) showToast('✅ Datos recuperados desde Drive', 'success');
+        });
+      }
+    } catch(_){}
+  }).catch(() => { /* no se pudo renovar callado: la UI ofrece reconectar */ });
+}
+
+// Listeners de fondo: subir lo pendiente al volver la conexión / al ocultar.
+function setupGdriveListeners(){
+  window.addEventListener('online', () => {
+    if (gdriveConfigured() && gdriveConnected() && GDRIVE._dirty) {
+      gdriveUpload().then(gdriveUpdateUI).catch(()=>{});
+    }
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden' && gdriveConfigured() && gdriveConnected() && GDRIVE._dirty) {
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+      gdriveUpload().then(gdriveUpdateUI).catch(()=>{});
+    }
+  });
+}
 
 </script>
 <script>
@@ -6514,6 +6875,7 @@ function openSyncMenu() {
       ? (cfg.nombre + (cfg.iniciales ? ' (' + cfg.iniciales + ')' : '') + (cfg.proyecto ? ' · ' + cfg.proyecto : ''))
       : 'Sin inspector configurado — tocá ⚙️ para configurar';
   }
+  if (typeof gdriveUpdateUI === 'function') gdriveUpdateUI();
   document.getElementById('sync-modal').classList.add('open');
 }
 
@@ -6527,38 +6889,8 @@ function closeSyncMenu() {
 async function exportCampo() {
   showToast('Preparando exportación de campo…');
   var cfg = getInspectorConfig();
-  var exportRecords = [];
-  for (var i = 0; i < records.length; i++) {
-    var r = Object.assign({}, records[i]);
-    r.photos = await resolveForExport(r.photos);
-    if (r.registroPhotos) {
-      r.registroPhotos = await Promise.all(r.registroPhotos.map(async function(p) {
-        var resolved = await resolveForExport([p.id]);
-        return { id: resolved[0] || p.id, caption: p.caption };
-      }));
-    }
-    if (r.evaluaciones && r.evaluaciones.length) {
-      var evs = [];
-      for (var j = 0; j < r.evaluaciones.length; j++) {
-        var ev = Object.assign({}, r.evaluaciones[j]);
-        ev.photos = await resolveForExport(ev.photos);
-        evs.push(ev);
-      }
-      r.evaluaciones = evs;
-    }
-    exportRecords.push(r);
-  }
-
-  var payload = {
-    _arborrisk_export: true,
-    _version: 1,
-    _exportedAt: new Date().toISOString(),
-    _inspector: cfg.nombre || 'Sin nombre',
-    _iniciales: cfg.iniciales || '',
-    _proyecto: cfg.proyecto || '',
-    _deviceId: getDeviceId(),
-    records: exportRecords
-  };
+  var payload = await buildArborBackupObject();
+  var exportRecords = payload.records;
 
   var fecha = new Date().toISOString().split('T')[0];
   var prefijo = cfg.iniciales ? cfg.iniciales + '_' : '';
