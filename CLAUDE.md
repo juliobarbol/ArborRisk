@@ -23,6 +23,7 @@
 - `manifest.webmanifest` — manifest PWA (instalación).
 - `icon.svg` — icono vectorial (usado por el manifest y como `apple-touch-icon`/`favicon`).
 - `CLAUDE.md` — esta guía.
+- `schema.sql` — **(Fase 2, futuro)** esquema Supabase para el sync en tiempo real multi-proyecto. Inerte hasta implementar `js/supabase.js`. Diseño completo en `docs/fase2-sync-supabase.md`.
 
 ## Mapa del código dentro de `index.html`
 El CSS y el JS están organizados por secciones marcadas con comentarios `/* css/<nombre>.css */` y `/* js/<nombre>.js */`.
