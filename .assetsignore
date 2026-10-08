@@ -2,3 +2,13 @@ wrangler.jsonc
 .assetsignore
 build.py
 CLAUDE.md
+# Sintaxis tipo .gitignore. El directorio de assets es la raíz del repo, así
+# que hay que excluir todo lo que no es la app (si no, Cloudflare publica el
+# historial de git, la config de Claude, los tests, etc.).
+.git
+.github
+.claude
+.gitignore
+.wrangler
+node_modules
+test

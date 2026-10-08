@@ -11,6 +11,9 @@
 //   - $NODE_PATH → node_modules con puppeteer-core
 //
 // Uso:  node test/pwa.test.cjs
+//       ARBOR_BASE_URL=http://127.0.0.1:8787 node test/pwa.test.cjs
+//         → contra un servidor ya levantado (ej. `wrangler dev`), que replica
+//           cómo sirve Cloudflare (incluido el 307 de /index.html → /).
 //
 // Nota: en el entorno remoto, la network policy puede bloquear cdnjs y los
 // tiles de OSM; por eso este test NO depende de recursos externos (usa solo
@@ -49,9 +52,10 @@ const check = (name, ok, extra) => {
 };
 
 (async () => {
-  const srv = spawn('python3', ['-m', 'http.server', String(PORT), '--bind', '127.0.0.1'],
+  const EXTERNAL = (process.env.ARBOR_BASE_URL || '').replace(/\/+$/, '');
+  const srv = EXTERNAL ? null : spawn('python3', ['-m', 'http.server', String(PORT), '--bind', '127.0.0.1'],
     { cwd: ROOT, stdio: 'ignore' });
-  await new Promise(r => setTimeout(r, 800));
+  if (srv) await new Promise(r => setTimeout(r, 800));
 
   const browser = await puppeteer.launch({
     executablePath: EXEC,
@@ -60,7 +64,7 @@ const check = (name, ok, extra) => {
   try {
     const page = await browser.newPage();
     page.on('pageerror', () => {}); // ignorar errores de libs externas bloqueadas
-    const base = `http://localhost:${PORT}/index.html`;
+    const base = `${EXTERNAL || `http://localhost:${PORT}`}/index.html`;
     await page.goto(base, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
     // SW activo y controlando la página (puede requerir un reload)
@@ -76,6 +80,18 @@ const check = (name, ok, extra) => {
         controller: !!navigator.serviceWorker.controller,
         scriptURL: (reg && reg.active && reg.active.scriptURL) || '',
         caches: await caches.keys(),
+        // Respuestas marcadas como redirigidas: Safari no las sirve en navegaciones.
+        redirected: await (async () => {
+          const out = [];
+          for (const k of await caches.keys()) {
+            const c = await caches.open(k);
+            for (const r of await c.keys()) {
+              const res = await c.match(r);
+              if (res && res.redirected) out.push(r.url);
+            }
+          }
+          return out;
+        })(),
         hasTileDownload: typeof window.downloadMapArea === 'function'
           && typeof window.lngLatToTile === 'function',
       };
@@ -84,6 +100,7 @@ const check = (name, ok, extra) => {
     check('SW es ./sw.js (archivo real, no blob:)', /\/sw\.js$/.test(info.scriptURL));
     check(`Cache de versión "${CACHE_VERSION}" creada`,
       !!CACHE_VERSION && info.caches.includes(CACHE_VERSION), 'caches: ' + info.caches.join(', '));
+    check('Cache sin respuestas redirigidas', info.redirected.length === 0, info.redirected.join(', '));
 
     // Funcionalidad de descarga de zona (solo ArborRisk)
     if (info.hasTileDownload) {
@@ -119,7 +136,7 @@ const check = (name, ok, extra) => {
 
   } finally {
     await browser.close();
-    srv.kill();
+    if (srv) srv.kill();
   }
 
   console.log(allOk ? '\n✓ TODOS LOS CHECKS OK' : '\n✗ HUBO FALLOS');

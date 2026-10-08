@@ -118,7 +118,8 @@ Cada módulo arranca con un marcador `/* js/nombre.js */`. Saltá directo al ran
 
 ### `build.py` y `.assetsignore`
 - `build.py` reescribe la línea `const CACHE_VERSION = '...';` de `sw.js` con `arborrisk-<timestamp UTC>`.
-- `.assetsignore` excluye `wrangler.jsonc`, `.assetsignore`, `build.py` y `CLAUDE.md` del deploy a Cloudflare.
+- `.assetsignore` excluye del deploy a Cloudflare todo lo que no es la app: `wrangler.jsonc`, `.assetsignore`, `build.py`, `CLAUDE.md`, `.git`, `.github`, `.claude`, `.gitignore`, `.wrangler`, `node_modules`, `test`. Como el directorio de assets es la raíz del repo, **cualquier archivo nuevo que no sea de la app hay que sumarlo acá** (si no, queda público).
+- Cloudflare redirige `/index.html` → `/` (307). Por eso `start_url` es `./` y el SW guarda las respuestas sin la marca de "redirigida" (`unredirect()`): Safari rechaza servir una respuesta redirigida en una navegación → la app no abriría offline.
 
 ## Cómo verificar cambios (sin romper)
 
@@ -136,6 +137,10 @@ PY
 **Comportamiento (navegador headless):** en sesiones de Claude Code on the web, el SessionStart hook (`.claude/hooks/session-start.sh`) deja instalado `chrome-headless-shell` + `puppeteer-core`. Test completo:
 ```bash
 node test/pwa.test.cjs
+```
+Para probar con la misma forma de servir de Cloudflare (incluido el 307 de `/index.html`), levantá `npx wrangler dev` y corré el test contra él:
+```bash
+ARBOR_BASE_URL=http://127.0.0.1:8787 node test/pwa.test.cjs
 ```
 
 ## Cosas que NO romper

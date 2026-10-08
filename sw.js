@@ -46,7 +46,10 @@ const TILE_MAX = 2500;
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE_VERSION);
-    await Promise.allSettled(APP_SHELL.map((url) => cache.add(url)));
+    await Promise.allSettled(APP_SHELL.map(async (url) => {
+      const res = await fetch(url, { cache: 'reload' });
+      if (res.ok) await cache.put(url, await unredirect(res));
+    }));
     await self.skipWaiting();
   })());
 });
@@ -71,6 +74,17 @@ function cachePut(req, res) {
     caches.open(CACHE_VERSION).then((c) => c.put(req, copy)).catch(() => {});
   }
   return res;
+}
+
+// -- Helper: quitar la marca de "redirigida" a una respuesta --
+// Cloudflare (Workers/Pages) redirige /index.html → / (307). Si esa
+// respuesta se guarda tal cual, queda marcada como redirigida y Safari
+// la rechaza al servirla en una navegacion (la app no abre sin senal).
+// Se reconstruye con el mismo cuerpo y headers, sin la marca.
+async function unredirect(res) {
+  if (!res || !res.redirected) return res;
+  const body = await res.blob();
+  return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
 }
 
 // -- Helper: fetch con timeout --------------------------------
@@ -167,7 +181,7 @@ self.addEventListener('fetch', (event) => {
         return fresh;
       } catch (e) {
         const cached = await matchAppShell(req);
-        return cached || Response.error();
+        return cached ? unredirect(cached) : Response.error();
       }
     })());
     return;
