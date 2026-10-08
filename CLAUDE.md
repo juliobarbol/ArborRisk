@@ -11,7 +11,7 @@
 
 ## ⚠️ Trabajar sin quemar tokens — LEER PRIMERO
 
-`index.html` pesa **~343 KB / ~6.983 líneas** (≈85k tokens). **Leerlo entero gasta un
+`index.html` pesa **~348 KB / ~7.200 líneas** (≈90k tokens). **Leerlo entero gasta un
 contexto casi completo de una.** Pero está limpio y dividido en secciones con marcadores
 `/* css/nombre.css */` y `/* js/nombre.js */`. Por eso la **lectura por rangos de línea
 es exacta y barata**. Reglas:
@@ -25,7 +25,7 @@ es exacta y barata**. Reglas:
 4. Para **editar**: `Grep` el `old_string` único → `Read` solo esa franja →
    `Edit`. No vuelvas a leer el archivo después de editar (el harness ya valida
    el cambio).
-5. **CSS** (31–1090) y **HTML/markup** (1091–2053) casi nunca hacen falta para
+5. **CSS** (31–1090) y **HTML/markup** (1091–2065) casi nunca hacen falta para
    lógica de negocio — no los leas salvo trabajo de estilos o maquetado.
 6. Si un rango no cuadra (el archivo creció), reubicá con:
    ```bash
@@ -38,8 +38,8 @@ es exacta y barata**. Reglas:
 |---|---|
 | `<head>` + CDN scripts | 1–29 |
 | **CSS** (3 bloques `<style>`) | 31–1090 |
-| **HTML / markup** (body, pestañas) | 1091–2053 |
-| **JS** (cada módulo en su propio `<script>`) | 2055–6980 |
+| **HTML / markup** (body, pestañas) | 1091–2065 |
+| **JS** (cada módulo en su propio `<script>`) | 2066–7210 |
 
 ### Módulos JS (cada uno en su propio `<script>`)
 
@@ -47,18 +47,18 @@ Cada módulo arranca con un marcador `/* js/nombre.js */`. Saltá directo al ran
 
 | Módulo | Líneas | Rol |
 |---|---|---|
-| `js/db.js` | 2055–2310 | **IndexedDB** (`ArborRiskDB`, v2). Stores `records` y `photos`. Helpers `dbPutPhoto`/`dbGetPhoto`/`dbDeletePhoto`. |
-| `js/state.js` | 2311–2500 | Estado global (`records`, `currentId`, `currentPhotos`, filtros, sort), autocompletar clientes/especies. |
-| `js/forms_registro.js` | 2501–3313 | Formulario de registro rápido en campo (FAB, modal de nueva ficha). |
-| `js/ui.js` | 3314–4097 | Render de listas/tarjetas, pestañas, vista de detalle, lightbox de fotos. |
-| `js/forms.js` | 4098–4761 | Formulario completo de evaluación (ficha de riesgo biomecánico). |
-| `js/pdf.js` | 4762–5244 | Generación de PDF con **jsPDF** (ficha individual y proyecto). |
-| `js/sync.js` | 5245–5473 | **Export/import JSON** (backup). `exportData`/`resolveForExport`/`blobToDataUrl`, export PDF de proyecto. |
-| `js/core.js` | 5474–5629 | Inicialización (`DOMContentLoaded`), `setupPWA()` (registra `./sw.js`), prompt de instalación. |
-| `js/map.js` | 5630–6048 | Mapa Leaflet, clustering de marcadores, picker de GPS, **descarga de zona offline** (`downloadMapArea`/`runTileDownload`/`lngLatToTile`). |
-| `js/projects.js` | 6049–6467 | Agrupación de fichas por cliente/proyecto. |
-| `js/config.js` | 6468–6774 | Configuración (tema, datos del profesional, etc.). |
-| `js/qr.js` | 6776–6980 | Generación de etiquetas con **QR** por ficha. |
+| `js/db.js` | 2067–2409 | **IndexedDB** (`ArborRiskDB`, v2). Stores `records` y `photos`. Helpers `dbPutPhoto`/`dbGetPhoto`/`dbDeletePhoto`. |
+| `js/state.js` | 2411–2599 | Estado global (`records`, `currentId`, `currentPhotos`, filtros, sort), autocompletar clientes/especies. |
+| `js/forms_registro.js` | 2601–3477 | Formulario de registro rápido en campo (FAB, modal de nueva ficha). |
+| `js/ui.js` | 3479–4261 | Render de listas/tarjetas, pestañas, vista de detalle, lightbox de fotos. |
+| `js/forms.js` | 4263–4925 | Formulario completo de evaluación (ficha de riesgo biomecánico). |
+| `js/pdf.js` | 4927–5408 | Generación de PDF con **jsPDF** (ficha individual y proyecto). |
+| `js/sync.js` | 5410–5718 | **Export/import JSON** (backup). `exportData`/`resolveForExport`/`blobToDataUrl`, export PDF de proyecto. |
+| `js/core.js` | 5720–5874 | Inicialización (`DOMContentLoaded`), `setupPWA()` (registra `./sw.js`), prompt de instalación. |
+| `js/map.js` | 5876–6293 | Mapa Leaflet, clustering de marcadores, picker de GPS, **descarga de zona offline** (`downloadMapArea`/`runTileDownload`/`lngLatToTile`). |
+| `js/projects.js` | 6295–6712 | Agrupación de fichas por cliente/proyecto. |
+| `js/config.js` | 6714–7005 | Configuración (tema, datos del profesional, etc.). |
+| `js/qr.js` | 7007–7209 | Generación de etiquetas con **QR** por ficha. |
 
 > Los rangos se mueven al editar. Si algo no cuadra, reubicá con
 > `grep -n "js/nombre.js" index.html` y leé el banner.
@@ -67,9 +67,9 @@ Cada módulo arranca con un marcador `/* js/nombre.js */`. Saltá directo al ran
 
 | Sección | Líneas | De qué se ocupa |
 |---|---|---|
-| `css/base.css` | 31–169 | Variables de tema (claro/oscuro), reset, tipografías. |
-| `css/components.css` | 170–873 | Componentes de UI (tarjetas, formularios, badges de riesgo, lightbox). |
-| `css/map.css` | 874–1090 | Estilos del mapa (Leaflet). |
+| `css/base.css` | 32–170 | Variables de tema (claro/oscuro), reset, tipografías. |
+| `css/components.css` | 171–874 | Componentes de UI (tarjetas, formularios, badges de riesgo, lightbox). |
+| `css/map.css` | 875–1089 | Estilos del mapa (Leaflet). |
 
 ## Arquitectura
 
@@ -91,12 +91,16 @@ Cada módulo arranca con un marcador `/* js/nombre.js */`. Saltá directo al ran
 
 ## Persistencia
 
-- **Fotos en IndexedDB, no en localStorage:** una foto se referencia por un ID; el blob vive en el store `photos`. Resolvé con `dbGetPhoto(id)`. Para el backup, `resolveForExport()` convierte los IDs a base64.
+- **Fotos en IndexedDB, no en localStorage:** una foto se referencia por un ID; el blob vive en el store `photos`. Resolvé con `dbGetPhoto(id)`. Para el backup, `recordForExport()` convierte a base64 **todas** las fotos de una ficha (`photos`, `evaluaciones[].photos` y `registroPhotos[].id`). Usalo en cualquier export nuevo.
+- **Importar:** después de cargar fichas de un archivo, llamar `migratePhotosToIDB(true)` (el `true` fuerza la migración base64 → blob aunque el flag `arborrisk_migrated_v2` ya esté puesto).
+- **Restaurar backup** (`importData`): valida el archivo antes de tocar nada, descarta IDs que no cumplan `isSafeRecordId()` (se usan dentro de `onclick`), guarda una **copia previa** (`dbPutSnapshot`, en el store `photos` con id `snapshot_prerestore`) y reemplaza todo en **una sola transacción** (`dbReplaceAll`). `undoLastRestore()` la recupera (botón en el menú Sincronización). `cleanupOrphanPhotos()` no borra las fotos que referencia la copia previa.
+- **Almacenamiento persistente:** `requestPersistentStorage()` al iniciar (sin eso el navegador puede borrar las fichas por falta de espacio).
+- **Recordatorio de backup:** banner `#backup-banner` cada `BACKUP_REMINDER_DAYS` (7) días desde el último export (`arborrisk_last_backup`); "✕" pospone 1 día (`arborrisk_backup_snooze`). Todo export completo llama `markBackupDone()`.
 - **localStorage solo para preferencias/borrador:** claves con prefijo `arborrisk_` (ej. `arborrisk_sort`, `pwa_dismissed`). No meter datos grandes ahí.
 
 ## Convenciones importantes
 
-- **XSS:** escapar SIEMPRE los datos del usuario antes de meterlos en `innerHTML` (varios render usan `.replace(/"/g,'&quot;')` y similares — mantener el patrón).
+- **XSS / texto del usuario:** todo dato del usuario o de un archivo importado que vaya dentro de `innerHTML` (o de un string HTML como popups del mapa o la etiqueta QR) pasa por **`esc()`** (definida al principio de `js/db.js`). No usar `esc()` con `textContent` (ahí se vería `&amp;`).
 - **Niveles de riesgo:** bajo / moderado / alto, con colores en variables CSS (`--low`, `--mod`, `--high`).
 
 ## PWA / Service Worker
@@ -138,6 +142,7 @@ PY
 **Comportamiento (navegador headless):** en sesiones de Claude Code on the web, el SessionStart hook (`.claude/hooks/session-start.sh`) deja instalado `chrome-headless-shell` + `puppeteer-core`. Test completo:
 ```bash
 node test/pwa.test.cjs
+node test/data.test.cjs   # backup/restauración/escapado — correrlo si tocás datos, export/import o renders
 ```
 Para probar con la misma forma de servir de Cloudflare (incluido el 307 de `/index.html`), levantá `npx wrangler dev` y corré el test contra él:
 ```bash

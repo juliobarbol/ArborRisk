@@ -1099,6 +1099,14 @@
     <button type="button" class="install-dismiss" onclick="dismissInstall()">✕</button>
   </div>
 
+  <!-- BACKUP REMINDER BANNER -->
+  <div class="install-banner" id="backup-banner" style="display:none">
+    <span style="font-size:20px">💾</span>
+    <p id="backup-banner-text">Hacé un respaldo de tus fichas</p>
+    <button type="button" class="install-btn" onclick="exportData()">Respaldar</button>
+    <button type="button" class="install-dismiss" onclick="snoozeBackupReminder()" title="Recordar mañana">✕</button>
+  </div>
+
   <!-- HEADER -->
   <div class="app-header">
     <div class="app-logo">
@@ -1966,6 +1974,9 @@
       <button type="button" class="btn-save" style="justify-content:flex-start;gap:10px;font-size:12px;background:var(--surface2);color:var(--text2);border:2px solid var(--border)" onclick="triggerImport();closeSyncMenu()">
         ♻️ Restaurar backup completo
       </button>
+      <button type="button" class="btn-save" id="undo-restore-btn" style="display:none;justify-content:flex-start;gap:10px;font-size:11px;background:var(--surface2);color:var(--text2);border:2px dashed var(--border)" onclick="closeSyncMenu();undoLastRestore()">
+        ↩️ Deshacer última restauración
+      </button>
 
     </div>
     <div style="padding:10px 16px;border-top:2px solid var(--border)">
@@ -2076,6 +2087,16 @@ function initDB() {
   });
 }
 
+// ── Escapado HTML ─────────────────────────────────────────────
+// Todo texto cargado por el usuario (o venido de un backup importado) que se
+// arma dentro de innerHTML pasa por esc(): así un "<" o "&" en una observación
+// no rompe la pantalla ni puede inyectar código.
+function esc(v) {
+  if (v === null || v === undefined) return '';
+  return String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 // ── Photo blob helpers ────────────────────────────────────────
 function dbPutPhoto(id, blob) {
   if (!db) return Promise.resolve();
@@ -2157,9 +2178,10 @@ async function resolvePhotoUrls(refs) {
 }
 
 // ── Migration: base64 → IDB blobs ────────────────────────────
-async function migratePhotosToIDB() {
-  // Skip if already migrated in this session or flagged as done
-  if (localStorage.getItem('arborrisk_migrated_v2') === '1') return;
+async function migratePhotosToIDB(force) {
+  // Skip if already migrated in this session or flagged as done.
+  // force=true tras importar un archivo: puede traer fotos en base64.
+  if (!force && localStorage.getItem('arborrisk_migrated_v2') === '1') return;
   var migrated = 0;
   for (var i = 0; i < records.length; i++) {
     var r = records[i];
@@ -2205,6 +2227,19 @@ async function migratePhotosToIDB() {
         }
       }
     }
+    // Migrate registro photos ([{id, caption}], id = base64 en backups)
+    if (r.registroPhotos && r.registroPhotos.length) {
+      for (var q = 0; q < r.registroPhotos.length; q++) {
+        var rp = r.registroPhotos[q];
+        if (rp && typeof rp.id === 'string' && rp.id.startsWith('data:')) {
+          var rid = newPhotoId();
+          await dbPutPhoto(rid, dataUrlToBlob(rp.id));
+          r.registroPhotos[q] = { id: rid, caption: rp.caption || '' };
+          changed = true;
+          migrated++;
+        }
+      }
+    }
     if (changed) await dbPut(r);
   }
   if (migrated > 0) {
@@ -2233,17 +2268,27 @@ function blobToDataUrl(blob) {
 }
 
 // ── Orphan cleanup: delete photo blobs no longer referenced ──
+function collectPhotoIds(recs, usedIds) {
+  (recs || []).forEach(function(r) {
+    if (!r) return;
+    (r.photos || []).forEach(function(p) { if (isPhotoId(p)) usedIds.add(p); });
+    (r.evaluaciones || []).forEach(function(ev) {
+      (ev.photos || []).forEach(function(p) { if (isPhotoId(p)) usedIds.add(p); });
+    });
+    (r.registroPhotos || []).forEach(function(p) { if (p && isPhotoId(p.id)) usedIds.add(p.id); });
+  });
+  return usedIds;
+}
+
 async function cleanupOrphanPhotos() {
   try {
     var allIds = await dbGetAllPhotoIds();
-    var usedIds = new Set();
-    records.forEach(function(r) {
-      (r.photos || []).forEach(function(p) { if (isPhotoId(p)) usedIds.add(p); });
-      (r.evaluaciones || []).forEach(function(ev) {
-        (ev.photos || []).forEach(function(p) { if (isPhotoId(p)) usedIds.add(p); });
-      });
-      (r.registroPhotos || []).forEach(function(p) { if (p && isPhotoId(p.id)) usedIds.add(p.id); });
-    });
+    var usedIds = collectPhotoIds(records, new Set());
+    // Las fotos de la copia previa a la última restauración no se borran:
+    // si se deshace la restauración, tienen que seguir estando.
+    usedIds.add(SNAPSHOT_ID);
+    var snap = await dbGetSnapshot();
+    if (snap) collectPhotoIds(snap.records, usedIds);
     var orphans = allIds.filter(function(id) { return !usedIds.has(id); });
     for (var i = 0; i < orphans.length; i++) {
       await dbDeletePhoto(orphans[i]);
@@ -2289,6 +2334,60 @@ function dbDelete(id) {
       req.onsuccess = function() { res(); };
       req.onerror   = function() { rej(req.error); };
     } catch(e) { rej(e); }
+  });
+}
+
+// Reemplaza TODAS las fichas en una sola transacción: si algo falla a mitad
+// de camino, IndexedDB revierte y quedan las fichas que había.
+function dbReplaceAll(recs) {
+  if (!db) return Promise.resolve();
+  return new Promise(function(res, rej) {
+    try {
+      var tx = db.transaction(STORE, 'readwrite');
+      var st = tx.objectStore(STORE);
+      st.clear();
+      recs.forEach(function(r) { st.put(r); });
+      tx.oncomplete = function() { res(); };
+      tx.onerror = function() { rej(tx.error); };
+      tx.onabort = function() { rej(tx.error || new Error('Transacción abortada')); };
+    } catch(e) { rej(e); }
+  });
+}
+
+// ── Copia previa a "Restaurar backup" ─────────────────────────
+// Se guarda en el store de fotos (como un blob JSON con id fijo) para no
+// tener que subir la versión de la base. Guarda las fichas tal cual (con
+// IDs de foto); cleanupOrphanPhotos respeta las fotos que referencia.
+var SNAPSHOT_ID = 'snapshot_prerestore';
+
+function dbPutSnapshot(recs) {
+  if (!db) return Promise.resolve();
+  return new Promise(function(res, rej) {
+    try {
+      var blob = new Blob([JSON.stringify(recs)], { type: 'application/json' });
+      var tx  = db.transaction(PHOTO_STORE, 'readwrite');
+      tx.objectStore(PHOTO_STORE).put({ id: SNAPSHOT_ID, blob: blob, at: new Date().toISOString(), count: recs.length });
+      tx.oncomplete = function() { res(); };
+      tx.onerror = function() { rej(tx.error); };
+      tx.onabort = function() { rej(tx.error || new Error('Transacción abortada')); };
+    } catch(e) { rej(e); }
+  });
+}
+
+function dbGetSnapshot() {
+  if (!db) return Promise.resolve(null);
+  return new Promise(function(res) {
+    try {
+      var req = db.transaction(PHOTO_STORE, 'readonly').objectStore(PHOTO_STORE).get(SNAPSHOT_ID);
+      req.onsuccess = function() {
+        var e = req.result;
+        if (!e || !e.blob) { res(null); return; }
+        e.blob.text().then(function(txt) {
+          res({ at: e.at, count: e.count, records: JSON.parse(txt) });
+        }).catch(function() { res(null); });
+      };
+      req.onerror = function() { res(null); };
+    } catch(e) { res(null); }
   });
 }
 
@@ -2342,7 +2441,7 @@ function updateClienteFilter() {
   )).sort(function(a, b) { return a.localeCompare(b); });
   sel.innerHTML = '<option value="">👤 Todos</option>'
     + clientes.map(function(c) {
-        return '<option value="' + c.replace(/"/g,'&quot;') + '"' + (c === current ? ' selected' : '') + '>' + c + '</option>';
+        return '<option value="' + esc(c) + '"' + (c === current ? ' selected' : '') + '>' + esc(c) + '</option>';
       }).join('');
 }
 
@@ -2384,8 +2483,8 @@ function autocompleteInput(fieldId, key) {
   listEl.innerHTML = matches.slice(0, 8).map(function(v) {
     var icon = key === 'especies' ? '🌿' : '👤';
     var highlighted = query
-      ? v.replace(new RegExp('(' + query.replace(/[.*+?^${}()|[\]\\]/g,'\\$&') + ')', 'gi'), '<strong>$1</strong>')
-      : v;
+      ? esc(v).replace(new RegExp('(' + esc(query).replace(/[.*+?^${}()|[\]\\]/g,'\\$&') + ')', 'gi'), '<strong>$1</strong>')
+      : esc(v);
     return '<div class="autocomplete-item" onmousedown="autocompleteSelect(\'' + fieldId + '\',this)">'
       + '<span class="autocomplete-item-icon">' + icon + '</span>'
       + highlighted
@@ -2833,8 +2932,8 @@ async function renderRegistroPhotoList() {
     div.className = 'photo-caption-item';
     var idx = i;
     div.innerHTML =
-      '<img class="photo-caption-thumb" src="' + url + '" alt="foto">'
-      + '<input class="photo-caption-input" type="text" placeholder="Epígrafe de la foto…" value="' + (item.caption || '').replace(/"/g,'&quot;') + '">'
+      '<img class="photo-caption-thumb" src="' + esc(url) + '" alt="foto">'
+      + '<input class="photo-caption-input" type="text" placeholder="Epígrafe de la foto…" value="' + esc(item.caption) + '">'
       + '<button type="button" class="photo-caption-del" onclick="removeRegistroPhoto(' + idx + ')">✕</button>';
     div.querySelector('.photo-caption-input').addEventListener('input', function(e) {
       currentRegistroPhotos[idx].caption = e.target.value;
@@ -3228,6 +3327,69 @@ const EVAL_AVANZADA = ['Tomografía de impulsos','Resistografía','Test de tracc
 const TRATAMIENTO = ['Monitoreo periódico','Poda de reducción','Eliminación de blancos','Anclajes artificiales','Tala del ejemplar','Otros'];
 
 // ============================================================
+// ALMACENAMIENTO PERSISTENTE + RECORDATORIO DE BACKUP
+// ============================================================
+// Sin este pedido el navegador puede borrar las fichas para liberar espacio.
+function requestPersistentStorage() {
+  try {
+    if (navigator.storage && navigator.storage.persist) {
+      navigator.storage.persisted().then(function(p) {
+        if (!p) return navigator.storage.persist();
+      }).catch(function() {});
+    }
+  } catch(e) {}
+}
+
+var BACKUP_REMINDER_DAYS = 7;
+
+function markBackupDone() {
+  try {
+    localStorage.setItem('arborrisk_last_backup', new Date().toISOString());
+    localStorage.removeItem('arborrisk_backup_snooze');
+  } catch(e) {}
+  checkBackupReminder();
+}
+
+function snoozeBackupReminder() {
+  try { localStorage.setItem('arborrisk_backup_snooze', String(Date.now() + 86400000)); } catch(e) {}
+  checkBackupReminder();
+}
+
+function checkBackupReminder() {
+  var el = document.getElementById('backup-banner');
+  if (!el) return;
+  var show = false, text = '';
+  try {
+    if (records.length) {
+      var now = Date.now();
+      var snooze = parseInt(localStorage.getItem('arborrisk_backup_snooze') || '0', 10) || 0;
+      if (now >= snooze) {
+        var last = Date.parse(localStorage.getItem('arborrisk_last_backup') || '') || 0;
+        if (last) {
+          var days = Math.floor((now - last) / 86400000);
+          if (days >= BACKUP_REMINDER_DAYS) {
+            show = true;
+            text = 'Hace ' + days + ' días que no hacés un respaldo. Si perdés el teléfono, perdés las fichas.';
+          }
+        } else {
+          // Nunca se hizo: contar desde la ficha más vieja
+          var oldest = records.reduce(function(m, r) {
+            var t = Date.parse(r.updatedAt || r.fecha || '');
+            return t && t < m ? t : m;
+          }, now);
+          if (now - oldest >= BACKUP_REMINDER_DAYS * 86400000) {
+            show = true;
+            text = 'Todavía no hiciste un respaldo de tus fichas. Si perdés el teléfono, se pierden.';
+          }
+        }
+      }
+    }
+  } catch(e) {}
+  if (show) document.getElementById('backup-banner-text').textContent = text;
+  el.style.display = show ? 'flex' : 'none';
+}
+
+// ============================================================
 // INIT
 // ============================================================
 async function init() {
@@ -3238,6 +3400,7 @@ async function init() {
     await migratePhotosToIDB();
     // Clean up orphaned photo blobs from previous deletes
     await cleanupOrphanPhotos();
+    requestPersistentStorage();
   } catch(e) {
     // IndexedDB blocked (iOS private mode, file:// protocol, etc.)
     // Fall back to in-memory mode — data won't persist between sessions
@@ -3260,6 +3423,7 @@ async function init() {
   renderList();
   updateStorage();
   updateHeaderInspector();
+  checkBackupReminder();
   checkDraft();
   setupPWA();
 }
@@ -3416,7 +3580,7 @@ function renderList(filtered) {
       ? (r.registroPhotos && r.registroPhotos[0] ? r.registroPhotos[0].id : null)
       : (r.photos && r.photos[0] ? r.photos[0] : null);
     const photoEl = photoRef
-      ? '<div class="card-photo-thumb"><img data-photoid="' + photoRef + '" alt="foto" style="width:100%;height:100%;object-fit:cover"></div>'
+      ? '<div class="card-photo-thumb"><img data-photoid="' + esc(photoRef) + '" alt="foto" style="width:100%;height:100%;object-fit:cover"></div>'
       : '<div class="card-photo-thumb">🌳</div>';
 
     var expiryStrip = '';
@@ -3427,7 +3591,7 @@ function renderList(filtered) {
       expiryStrip = '<div class="expiring-card-strip">⚠ ' + es.label + '</div>';
     }
 
-    var vigenciaMeta = r.vigencia ? '<span>⏱ ' + (VIGENCIA_LABEL[r.vigencia] || r.vigencia) + '</span>' : '';
+    var vigenciaMeta = r.vigencia ? '<span>⏱ ' + esc(VIGENCIA_LABEL[r.vigencia] || r.vigencia) + '</span>' : '';
     var evalCount = r.evaluaciones && r.evaluaciones.length > 0
       ? '<span>🔄 ' + (r.evaluaciones.length + 1) + ' evaluaciones</span>' : '';
     var inspectorMeta = '';
@@ -3438,7 +3602,7 @@ function renderList(filtered) {
     var INTERV_LABEL = { pendiente: '🔧 Pendiente', en_curso: '⚙ En curso', ejecutado: '✔ Ejecutado', descartado: '✗ Descartado' };
     var INTERV_COLOR = { pendiente: 'var(--mod)', en_curso: '#1976d2', ejecutado: 'var(--low)', descartado: 'var(--text3)' };
     var intervBadge = r.intervencion
-      ? '<span style="font-size:9px;font-weight:700;padding:1px 7px;border-radius:10px;background:' + INTERV_COLOR[r.intervencion] + ';color:#fff;white-space:nowrap">' + (INTERV_LABEL[r.intervencion] || r.intervencion) + '</span>'
+      ? '<span style="font-size:9px;font-weight:700;padding:1px 7px;border-radius:10px;background:' + INTERV_COLOR[r.intervencion] + ';color:#fff;white-space:nowrap">' + esc(INTERV_LABEL[r.intervencion] || r.intervencion) + '</span>'
       : '';
 
     card.innerHTML =
@@ -3446,16 +3610,16 @@ function renderList(filtered) {
       '<div style="flex:1;display:flex;flex-direction:column;min-width:0">' +
         '<div class="card-body" style="flex:1">' +
           '<div class="card-top">' +
-            '<div class="card-code">' + (r.code || '—') + '</div>' +
+            '<div class="card-code">' + esc(r.code || '—') + '</div>' +
             '<div style="display:flex;gap:4px;align-items:center">' +
               intervBadge +
               '<div class="risk-badge ' + riskClass + '">' + riskText + '</div>' +
             '</div>' +
           '</div>' +
-          '<div class="card-species">' + (r.especie || 'Sin especie') + '</div>' +
+          '<div class="card-species">' + esc(r.especie || 'Sin especie') + '</div>' +
           '<div class="card-meta">' +
-            '<span>👤 ' + (r.cliente || r.ubicacion || '—') + '</span>' +
-            '<span>📅 ' + (r.fecha || '—') + '</span>' +
+            '<span>👤 ' + esc(r.cliente || r.ubicacion || '—') + '</span>' +
+            '<span>📅 ' + esc(r.fecha || '—') + '</span>' +
             vigenciaMeta +
             evalCount +
             inspectorMeta +
@@ -3539,7 +3703,7 @@ async function openDetail(id) {
   // Hero image
   var hero = document.getElementById('detail-hero');
   if (photoUrls.length > 0) {
-    hero.innerHTML = '<img src="' + photoUrls[0] + '" alt="foto principal" style="width:100%;max-height:200px;object-fit:cover">';
+    hero.innerHTML = '<img src="' + esc(photoUrls[0]) + '" alt="foto principal" style="width:100%;max-height:200px;object-fit:cover">';
   } else {
     hero.innerHTML = '<div class="detail-hero-placeholder">🌳</div>';
   }
@@ -3557,7 +3721,7 @@ async function openDetail(id) {
     gpsHtml = '<div class="detail-row">'
       + '<div class="detail-key">GPS</div>'
       + '<div class="detail-val">'
-      + '<div style="font-family:var(--mono);font-size:11px;margin-bottom:4px">' + coords + '</div>'
+      + '<div style="font-family:var(--mono);font-size:11px;margin-bottom:4px">' + esc(coords) + '</div>'
       + '<a class="gps-link" href="' + mapsUrl + '" target="_blank" rel="noopener">📍 Abrir en Maps</a>'
       + '</div></div>';
   }
@@ -3571,8 +3735,8 @@ async function openDetail(id) {
     var expLabel = es ? es.label : '—';
     validityHtml = '<div class="detail-section">'
       + '<div class="detail-section-title">Vigencia del Diagnóstico</div>'
-      + '<div class="detail-row"><div class="detail-key">Marco de tiempo</div><div class="detail-val">' + (VIGENCIA_LABEL[r.vigencia] || r.vigencia) + '</div></div>'
-      + '<div class="detail-row"><div class="detail-key">Fecha inspección</div><div class="detail-val">' + (r.fecha || '—') + '</div></div>'
+      + '<div class="detail-row"><div class="detail-key">Marco de tiempo</div><div class="detail-val">' + esc(VIGENCIA_LABEL[r.vigencia] || r.vigencia) + '</div></div>'
+      + '<div class="detail-row"><div class="detail-key">Fecha inspección</div><div class="detail-val">' + esc(r.fecha || '—') + '</div></div>'
       + '<div class="detail-row"><div class="detail-key">Vencimiento</div><div class="detail-val">' + formatExpiryDate(r) + '</div></div>'
       + '<div class="detail-row"><div class="detail-key">Estado</div><div class="detail-val"><span class="validity-badge ' + expClass + '">' + expIcon + ' ' + expLabel + '</span></div></div>'
       + '</div>';
@@ -3584,7 +3748,7 @@ async function openDetail(id) {
     defectsHtml = '<div class="detail-section">'
       + '<div class="detail-section-title">Defectos Detectados</div>'
       + '<div class="detail-tags">'
-      + allDefects.map(function(d) { return '<div class="detail-tag">⚠ ' + d + '</div>'; }).join('')
+      + allDefects.map(function(d) { return '<div class="detail-tag">⚠ ' + esc(d) + '</div>'; }).join('')
       + '</div></div>';
   }
 
@@ -3593,9 +3757,9 @@ async function openDetail(id) {
   if ((r.evalAvanzada && r.evalAvanzada.length) || (r.tratamiento && r.tratamiento.length)) {
     recoHtml = '<div class="detail-section"><div class="detail-section-title">Recomendaciones</div>';
     if (r.evalAvanzada && r.evalAvanzada.length)
-      recoHtml += '<div class="detail-row"><div class="detail-key">Evaluación</div><div class="detail-val">' + r.evalAvanzada.join(', ') + '</div></div>';
+      recoHtml += '<div class="detail-row"><div class="detail-key">Evaluación</div><div class="detail-val">' + esc(r.evalAvanzada.join(', ')) + '</div></div>';
     if (r.tratamiento && r.tratamiento.length)
-      recoHtml += '<div class="detail-row"><div class="detail-key">Tratamiento</div><div class="detail-val">' + r.tratamiento.join(', ') + '</div></div>';
+      recoHtml += '<div class="detail-row"><div class="detail-key">Tratamiento</div><div class="detail-val">' + esc(r.tratamiento.join(', ')) + '</div></div>';
     recoHtml += '</div>';
   }
 
@@ -3606,7 +3770,7 @@ async function openDetail(id) {
       + '<div class="detail-section-title">Fotografías (' + photoUrls.length + ')</div>'
       + '<div class="detail-photo-grid">'
       + photoUrls.map(function(p, i) {
-          return '<div class="detail-photo-item" onclick="openLightbox(' + i + ',\'' + r.id + '\')"><img src="' + p + '" alt="foto ' + (i+1) + '"></div>';
+          return '<div class="detail-photo-item" onclick="openLightbox(' + i + ',\'' + esc(r.id) + '\')"><img src="' + esc(p) + '" alt="foto ' + (i+1) + '"></div>';
         }).join('')
       + '</div></div>';
   }
@@ -3625,14 +3789,14 @@ async function openDetail(id) {
   if (rvItems.length || r.rvBlanco || r.rvOcupacion || r.rvPodaObjetivo || r.rvTareasObs) {
     relevHtml = '<div class="detail-section"><div class="detail-section-title">Relevamiento Visual</div>';
     rvItems.forEach(function(g) {
-      relevHtml += '<div class="detail-row"><div class="detail-key">' + g.label + '</div>'
-        + '<div class="detail-val">' + g.items.join(', ') + '</div></div>';
+      relevHtml += '<div class="detail-row"><div class="detail-key">' + esc(g.label) + '</div>'
+        + '<div class="detail-val">' + esc(g.items.join(', ')) + '</div></div>';
     });
-    if (r.rvBlanco && r.rvBlanco.length) relevHtml += '<div class="detail-row"><div class="detail-key">Blanco</div><div class="detail-val">' + r.rvBlanco.join(', ') + '</div></div>';
-    if (r.rvOcupacion) relevHtml += '<div class="detail-row"><div class="detail-key">Ocupación</div><div class="detail-val">' + r.rvOcupacion + '</div></div>';
-    if (r.rvPodaObjetivo || r.rvPodaTipo) relevHtml += '<div class="detail-row"><div class="detail-key">Poda</div><div class="detail-val">' + [r.rvPodaObjetivo, r.rvPodaTipo].filter(Boolean).join(' / ') + '</div></div>';
-    if (r.rvTareas && r.rvTareas.length) relevHtml += '<div class="detail-row"><div class="detail-key">Tareas</div><div class="detail-val">' + r.rvTareas.join(', ') + '</div></div>';
-    if (r.rvTareasObs) relevHtml += '<div class="detail-row"><div class="detail-key">Observaciones</div><div class="detail-val">' + r.rvTareasObs + '</div></div>';
+    if (r.rvBlanco && r.rvBlanco.length) relevHtml += '<div class="detail-row"><div class="detail-key">Blanco</div><div class="detail-val">' + esc(r.rvBlanco.join(', ')) + '</div></div>';
+    if (r.rvOcupacion) relevHtml += '<div class="detail-row"><div class="detail-key">Ocupación</div><div class="detail-val">' + esc(r.rvOcupacion) + '</div></div>';
+    if (r.rvPodaObjetivo || r.rvPodaTipo) relevHtml += '<div class="detail-row"><div class="detail-key">Poda</div><div class="detail-val">' + esc([r.rvPodaObjetivo, r.rvPodaTipo].filter(Boolean).join(' / ')) + '</div></div>';
+    if (r.rvTareas && r.rvTareas.length) relevHtml += '<div class="detail-row"><div class="detail-key">Tareas</div><div class="detail-val">' + esc(r.rvTareas.join(', ')) + '</div></div>';
+    if (r.rvTareasObs) relevHtml += '<div class="detail-row"><div class="detail-key">Observaciones</div><div class="detail-val">' + esc(r.rvTareasObs) + '</div></div>';
     relevHtml += '</div>';
   }
 
@@ -3640,28 +3804,28 @@ async function openDetail(id) {
   var body = validityHtml
     + '<div class="detail-section">'
     +   '<div class="detail-section-title">Índice de Riesgo</div>'
-    +   '<div class="detail-risk-badge ' + riskClass + '">' + riskText + (r.riskScore ? ' — ' + r.riskScore + ' pts' : '') + '</div>'
+    +   '<div class="detail-risk-badge ' + riskClass + '">' + riskText + (r.riskScore ? ' — ' + esc(r.riskScore) + ' pts' : '') + '</div>'
     + '</div>'
     + '<div class="detail-section">'
     +   '<div class="detail-section-title">Identificación</div>'
-    +   '<div class="detail-row"><div class="detail-key">Código</div><div class="detail-val">' + (r.code || '—') + '</div></div>'
-    +   '<div class="detail-row"><div class="detail-key">Especie</div><div class="detail-val" style="font-style:italic">' + (r.especie || '—') + '</div></div>'
-    +   '<div class="detail-row"><div class="detail-key">Cliente</div><div class="detail-val">' + (r.cliente || '—') + '</div></div>'
-    +   '<div class="detail-row"><div class="detail-key">Fecha</div><div class="detail-val">' + (r.fecha || '—') + '</div></div>'
-    +   '<div class="detail-row"><div class="detail-key">DAP</div><div class="detail-val">' + (r.dap ? r.dap + ' cm' : '—') + '</div></div>'
-    +   '<div class="detail-row"><div class="detail-key">Altura</div><div class="detail-val">' + (r.altura ? r.altura + ' m' : '—') + '</div></div>'
-    +   '<div class="detail-row"><div class="detail-key">Ø Copa</div><div class="detail-val">' + (r.copa ? r.copa + ' m' : '—') + '</div></div>'
+    +   '<div class="detail-row"><div class="detail-key">Código</div><div class="detail-val">' + esc(r.code || '—') + '</div></div>'
+    +   '<div class="detail-row"><div class="detail-key">Especie</div><div class="detail-val" style="font-style:italic">' + esc(r.especie || '—') + '</div></div>'
+    +   '<div class="detail-row"><div class="detail-key">Cliente</div><div class="detail-val">' + esc(r.cliente || '—') + '</div></div>'
+    +   '<div class="detail-row"><div class="detail-key">Fecha</div><div class="detail-val">' + esc(r.fecha || '—') + '</div></div>'
+    +   '<div class="detail-row"><div class="detail-key">DAP</div><div class="detail-val">' + esc(r.dap ? r.dap + ' cm' : '—') + '</div></div>'
+    +   '<div class="detail-row"><div class="detail-key">Altura</div><div class="detail-val">' + esc(r.altura ? r.altura + ' m' : '—') + '</div></div>'
+    +   '<div class="detail-row"><div class="detail-key">Ø Copa</div><div class="detail-val">' + esc(r.copa ? r.copa + ' m' : '—') + '</div></div>'
     +   gpsHtml
     + '</div>'
     + '<div class="detail-section">'
     +   '<div class="detail-section-title">Sitio y Fisiología</div>'
-    +   '<div class="detail-row"><div class="detail-key">Tráfico</div><div class="detail-val">' + (r.trafico || '—') + '</div></div>'
-    +   '<div class="detail-row"><div class="detail-key">Suelo</div><div class="detail-val">' + (r.suelo || '—') + '</div></div>'
-    +   '<div class="detail-row"><div class="detail-key">Viento</div><div class="detail-val">' + (r.viento || '—') + '</div></div>'
-    +   '<div class="detail-row"><div class="detail-key">Vitalidad</div><div class="detail-val">' + (r.vitalidad || '—') + '</div></div>'
-    +   (r.plagas   ? '<div class="detail-row"><div class="detail-key">Plagas</div><div class="detail-val">'   + r.plagas   + '</div></div>' : '')
-    +   (r.abiotico ? '<div class="detail-row"><div class="detail-key">Abiótico</div><div class="detail-val">' + r.abiotico + '</div></div>' : '')
-    +   (r.historia ? '<div class="detail-row"><div class="detail-key">Historia</div><div class="detail-val">' + r.historia + '</div></div>' : '')
+    +   '<div class="detail-row"><div class="detail-key">Tráfico</div><div class="detail-val">' + esc(r.trafico || '—') + '</div></div>'
+    +   '<div class="detail-row"><div class="detail-key">Suelo</div><div class="detail-val">' + esc(r.suelo || '—') + '</div></div>'
+    +   '<div class="detail-row"><div class="detail-key">Viento</div><div class="detail-val">' + esc(r.viento || '—') + '</div></div>'
+    +   '<div class="detail-row"><div class="detail-key">Vitalidad</div><div class="detail-val">' + esc(r.vitalidad || '—') + '</div></div>'
+    +   (r.plagas   ? '<div class="detail-row"><div class="detail-key">Plagas</div><div class="detail-val">'   + esc(r.plagas)   + '</div></div>' : '')
+    +   (r.abiotico ? '<div class="detail-row"><div class="detail-key">Abiótico</div><div class="detail-val">' + esc(r.abiotico) + '</div></div>' : '')
+    +   (r.historia ? '<div class="detail-row"><div class="detail-key">Historia</div><div class="detail-val">' + esc(r.historia) + '</div></div>' : '')
     + '</div>'
     + defectsHtml
     + relevHtml
@@ -3702,7 +3866,7 @@ async function openDetailRegistro(r) {
     firstPhotoUrl = await resolvePhotoUrl(r.registroPhotos[0].id);
   }
   if (firstPhotoUrl) {
-    hero.innerHTML = '<img src="' + firstPhotoUrl + '" alt="foto principal" style="width:100%;max-height:200px;object-fit:cover">';
+    hero.innerHTML = '<img src="' + esc(firstPhotoUrl) + '" alt="foto principal" style="width:100%;max-height:200px;object-fit:cover">';
   } else {
     hero.innerHTML = '<div class="detail-hero-placeholder">🌳</div>';
   }
@@ -3712,7 +3876,7 @@ async function openDetailRegistro(r) {
   if (r.gps) {
     var mapsUrl = 'https://maps.google.com/?q=' + encodeURIComponent(r.gps.trim());
     gpsHtml = '<div class="detail-row"><div class="detail-key">GPS</div><div class="detail-val">'
-      + '<div style="font-family:var(--mono);font-size:11px;margin-bottom:4px">' + r.gps + '</div>'
+      + '<div style="font-family:var(--mono);font-size:11px;margin-bottom:4px">' + esc(r.gps) + '</div>'
       + '<a class="gps-link" href="' + mapsUrl + '" target="_blank" rel="noopener">📍 Abrir en Maps</a>'
       + '</div></div>';
   }
@@ -3720,7 +3884,7 @@ async function openDetailRegistro(r) {
   // Estado badge
   var estadoColors = { bueno:'risk-low', regular:'risk-mod', malo:'risk-high', critico:'risk-high' };
   var estadoBadge = r.estado
-    ? '<div class="detail-risk-badge ' + (estadoColors[r.estado] || 'risk-low') + '">' + r.estado.toUpperCase() + '</div>'
+    ? '<div class="detail-risk-badge ' + (estadoColors[r.estado] || 'risk-low') + '">' + esc(r.estado.toUpperCase()) + '</div>'
     : '';
 
   // Fotos grid
@@ -3731,8 +3895,8 @@ async function openDetailRegistro(r) {
       var p = r.registroPhotos[i];
       var url = await resolvePhotoUrl(p.id);
       if (url) {
-        photosHtml += '<div class="detail-photo-item" onclick="openRegistroDetailLightbox(\'' + r.id + '\',' + i + ')">'
-          + '<img src="' + url + '" alt="foto ' + (i+1) + '">'
+        photosHtml += '<div class="detail-photo-item" onclick="openRegistroDetailLightbox(\'' + esc(r.id) + '\',' + i + ')">'
+          + '<img src="' + esc(url) + '" alt="foto ' + (i+1) + '">'
           + '</div>';
       }
     }
@@ -3745,38 +3909,38 @@ async function openDetailRegistro(r) {
     + estadoBadge
     + '</div>'
     + '<div class="detail-section"><div class="detail-section-title">Identificación</div>'
-    + '<div class="detail-row"><div class="detail-key">Código</div><div class="detail-val">' + (r.code || '—') + '</div></div>'
-    + '<div class="detail-row"><div class="detail-key">Denominación</div><div class="detail-val">' + (r.denominacion || '—') + '</div></div>'
-    + '<div class="detail-row"><div class="detail-key">Especie</div><div class="detail-val" style="font-style:italic">' + (r.especie || '—') + '</div></div>'
-    + '<div class="detail-row"><div class="detail-key">Cantidad</div><div class="detail-val">' + (r.cantidad || '—') + '</div></div>'
-    + '<div class="detail-row"><div class="detail-key">Año plantación</div><div class="detail-val">' + (r.anio || '—') + '</div></div>'
-    + '<div class="detail-row"><div class="detail-key">DAP</div><div class="detail-val">' + (r.dap ? r.dap + ' cm' : '—') + '</div></div>'
-    + '<div class="detail-row"><div class="detail-key">Altura</div><div class="detail-val">' + (r.altura ? r.altura + ' m' : '—') + '</div></div>'
-    + '<div class="detail-row"><div class="detail-key">Ø Copa</div><div class="detail-val">' + (r.copa ? r.copa + ' m' : '—') + '</div></div>'
-    + '<div class="detail-row"><div class="detail-key">Fecha</div><div class="detail-val">' + (r.fecha || '—') + '</div></div>'
-    + '<div class="detail-row"><div class="detail-key">Inspector</div><div class="detail-val">' + (r.inspector || '—') + '</div></div>'
+    + '<div class="detail-row"><div class="detail-key">Código</div><div class="detail-val">' + esc(r.code || '—') + '</div></div>'
+    + '<div class="detail-row"><div class="detail-key">Denominación</div><div class="detail-val">' + esc(r.denominacion || '—') + '</div></div>'
+    + '<div class="detail-row"><div class="detail-key">Especie</div><div class="detail-val" style="font-style:italic">' + esc(r.especie || '—') + '</div></div>'
+    + '<div class="detail-row"><div class="detail-key">Cantidad</div><div class="detail-val">' + esc(r.cantidad || '—') + '</div></div>'
+    + '<div class="detail-row"><div class="detail-key">Año plantación</div><div class="detail-val">' + esc(r.anio || '—') + '</div></div>'
+    + '<div class="detail-row"><div class="detail-key">DAP</div><div class="detail-val">' + esc(r.dap ? r.dap + ' cm' : '—') + '</div></div>'
+    + '<div class="detail-row"><div class="detail-key">Altura</div><div class="detail-val">' + esc(r.altura ? r.altura + ' m' : '—') + '</div></div>'
+    + '<div class="detail-row"><div class="detail-key">Ø Copa</div><div class="detail-val">' + esc(r.copa ? r.copa + ' m' : '—') + '</div></div>'
+    + '<div class="detail-row"><div class="detail-key">Fecha</div><div class="detail-val">' + esc(r.fecha || '—') + '</div></div>'
+    + '<div class="detail-row"><div class="detail-key">Inspector</div><div class="detail-val">' + esc(r.inspector || '—') + '</div></div>'
     + '</div>'
     + '<div class="detail-section"><div class="detail-section-title">Ubicación</div>'
-    + '<div class="detail-row"><div class="detail-key">Ubicación</div><div class="detail-val">' + (r.ubicacion || '—') + '</div></div>'
-    + (r.localizacion ? '<div class="detail-row"><div class="detail-key">Referencias</div><div class="detail-val">' + r.localizacion + '</div></div>' : '')
-    + '<div class="detail-row"><div class="detail-key">Barrio</div><div class="detail-val">' + (r.barrio || '—') + '</div></div>'
-    + '<div class="detail-row"><div class="detail-key">Propietario</div><div class="detail-val">' + (r.propietario || '—') + '</div></div>'
-    + '<div class="detail-row"><div class="detail-key">Acceso</div><div class="detail-val">' + (r.acceso || '—') + '</div></div>'
-    + (r.gestionado ? '<div class="detail-row"><div class="detail-key">Gestionado por</div><div class="detail-val">' + r.gestionado + '</div></div>' : '')
+    + '<div class="detail-row"><div class="detail-key">Ubicación</div><div class="detail-val">' + esc(r.ubicacion || '—') + '</div></div>'
+    + (r.localizacion ? '<div class="detail-row"><div class="detail-key">Referencias</div><div class="detail-val">' + esc(r.localizacion) + '</div></div>' : '')
+    + '<div class="detail-row"><div class="detail-key">Barrio</div><div class="detail-val">' + esc(r.barrio || '—') + '</div></div>'
+    + '<div class="detail-row"><div class="detail-key">Propietario</div><div class="detail-val">' + esc(r.propietario || '—') + '</div></div>'
+    + '<div class="detail-row"><div class="detail-key">Acceso</div><div class="detail-val">' + esc(r.acceso || '—') + '</div></div>'
+    + (r.gestionado ? '<div class="detail-row"><div class="detail-key">Gestionado por</div><div class="detail-val">' + esc(r.gestionado) + '</div></div>' : '')
     + gpsHtml
     + '</div>'
     + '<div class="detail-section"><div class="detail-section-title">Entorno</div>'
-    + (r.plantera ? '<div class="detail-row"><div class="detail-key">Plantera</div><div class="detail-val">' + r.plantera + '</div></div>' : '')
-    + (r.solado ? '<div class="detail-row"><div class="detail-key">Solado</div><div class="detail-val">' + r.solado + '</div></div>' : '')
-    + (r.instalaciones ? '<div class="detail-row"><div class="detail-key">Instalaciones</div><div class="detail-val">' + r.instalaciones + '</div></div>' : '')
-    + (r.perimetro ? '<div class="detail-row"><div class="detail-key">Perímetro</div><div class="detail-val">' + r.perimetro.replace('_',' ') + '</div></div>' : '')
-    + (r.puntales ? '<div class="detail-row"><div class="detail-key">Puntales</div><div class="detail-val">' + r.puntales + '</div></div>' : '')
-    + (r.carteleria ? '<div class="detail-row"><div class="detail-key">Cartelería</div><div class="detail-val">' + r.carteleria + '</div></div>' : '')
+    + (r.plantera ? '<div class="detail-row"><div class="detail-key">Plantera</div><div class="detail-val">' + esc(r.plantera) + '</div></div>' : '')
+    + (r.solado ? '<div class="detail-row"><div class="detail-key">Solado</div><div class="detail-val">' + esc(r.solado) + '</div></div>' : '')
+    + (r.instalaciones ? '<div class="detail-row"><div class="detail-key">Instalaciones</div><div class="detail-val">' + esc(r.instalaciones) + '</div></div>' : '')
+    + (r.perimetro ? '<div class="detail-row"><div class="detail-key">Perímetro</div><div class="detail-val">' + esc(r.perimetro.replace('_',' ')) + '</div></div>' : '')
+    + (r.puntales ? '<div class="detail-row"><div class="detail-key">Puntales</div><div class="detail-val">' + esc(r.puntales) + '</div></div>' : '')
+    + (r.carteleria ? '<div class="detail-row"><div class="detail-key">Cartelería</div><div class="detail-val">' + esc(r.carteleria) + '</div></div>' : '')
     + '</div>'
     + (r.descripcion || r.observaciones
       ? '<div class="detail-section"><div class="detail-section-title">Descripción y Observaciones</div>'
-        + (r.descripcion ? '<div class="detail-row"><div class="detail-key">Descripción</div><div class="detail-val">' + r.descripcion + '</div></div>' : '')
-        + (r.observaciones ? '<div class="detail-row"><div class="detail-key">Observaciones</div><div class="detail-val">' + r.observaciones + '</div></div>' : '')
+        + (r.descripcion ? '<div class="detail-row"><div class="detail-key">Descripción</div><div class="detail-val">' + esc(r.descripcion) + '</div></div>' : '')
+        + (r.observaciones ? '<div class="detail-row"><div class="detail-key">Observaciones</div><div class="detail-val">' + esc(r.observaciones) + '</div></div>' : '')
         + '</div>'
       : '')
     + photosHtml;
@@ -3787,8 +3951,8 @@ async function openDetailRegistro(r) {
   var footer = document.querySelector('#detail-overlay .detail-footer');
   if (footer) {
     footer.innerHTML =
-      '<button type="button" class="btn-save" style="font-size:13px;background:#0097a7" onclick="openFormRegistro(\'' + r.id + '\');closeDetail()">✏ Editar</button>'
-      + '<button type="button" class="icon-btn" style="padding:10px 12px;background:var(--surface2);border:2px solid var(--border);color:var(--text2);flex-shrink:0" onclick="exportRegistroPDF(\'' + r.id + '\')">📄 PDF</button>';
+      '<button type="button" class="btn-save" style="font-size:13px;background:#0097a7" onclick="openFormRegistro(\'' + esc(r.id) + '\');closeDetail()">✏ Editar</button>'
+      + '<button type="button" class="icon-btn" style="padding:10px 12px;background:var(--surface2);border:2px solid var(--border);color:var(--text2);flex-shrink:0" onclick="exportRegistroPDF(\'' + esc(r.id) + '\')">📄 PDF</button>';
   }
   // Inyectar botón QR
   injectQRButton(r.id);
@@ -3819,7 +3983,7 @@ function buildTimeline(r) {
   }
   function riskLabel(level, score) {
     var t = level === 'high' ? 'ALTO' : level === 'mod' ? 'MOD' : level === 'low' ? 'BAJO' : '—';
-    return t + (score ? ' · ' + score + ' pts' : '');
+    return t + (score ? ' · ' + esc(score) + ' pts' : '');
   }
   function evalCard(ev, idx, isCurrent) {
     var defects = [].concat(ev.defRaices || [], ev.defTronco || [], ev.defRamas || []);
@@ -3828,17 +3992,17 @@ function buildTimeline(r) {
     var riskClass = ev.riskLevel === 'high' ? 'risk-high' : ev.riskLevel === 'mod' ? 'risk-mod' : 'risk-low';
 
     var body = '';
-    if (ev.vitalidad)   body += '<div class="timeline-row"><span class="timeline-key">Vitalidad</span><span class="timeline-val">' + ev.vitalidad + '</span></div>';
-    if (ev.probabilidad) body += '<div class="timeline-row"><span class="timeline-key">Probabilidad</span><span class="timeline-val">' + ev.probabilidad + '</span></div>';
-    if (defects.length)  body += '<div class="timeline-label">Defectos</div><div class="timeline-tags">' + defects.map(function(d) { return '<span class="timeline-tag">⚠ ' + d + '</span>'; }).join('') + '</div>';
-    if (ev.tratamiento && ev.tratamiento.length) body += '<div class="timeline-row"><span class="timeline-key">Tratamiento</span><span class="timeline-val">' + ev.tratamiento.join(', ') + '</span></div>';
-    if (ev.vigencia)     body += '<div class="timeline-row"><span class="timeline-key">Vigencia</span><span class="timeline-val">' + (VIGENCIA_LABEL[ev.vigencia] || ev.vigencia) + '</span></div>';
+    if (ev.vitalidad)   body += '<div class="timeline-row"><span class="timeline-key">Vitalidad</span><span class="timeline-val">' + esc(ev.vitalidad) + '</span></div>';
+    if (ev.probabilidad) body += '<div class="timeline-row"><span class="timeline-key">Probabilidad</span><span class="timeline-val">' + esc(ev.probabilidad) + '</span></div>';
+    if (defects.length)  body += '<div class="timeline-label">Defectos</div><div class="timeline-tags">' + defects.map(function(d) { return '<span class="timeline-tag">⚠ ' + esc(d) + '</span>'; }).join('') + '</div>';
+    if (ev.tratamiento && ev.tratamiento.length) body += '<div class="timeline-row"><span class="timeline-key">Tratamiento</span><span class="timeline-val">' + esc(ev.tratamiento.join(', ')) + '</span></div>';
+    if (ev.vigencia)     body += '<div class="timeline-row"><span class="timeline-key">Vigencia</span><span class="timeline-val">' + esc(VIGENCIA_LABEL[ev.vigencia] || ev.vigencia) + '</span></div>';
     if (ev.photos && ev.photos.length) {
       var photosEncoded = encodeURIComponent(JSON.stringify(ev.photos));
       body += '<div class="timeline-label">Fotos (' + ev.photos.length + ')</div>'
         + '<div style="display:flex;gap:6px;padding:4px 12px 10px;flex-wrap:wrap">'
         + ev.photos.slice(0, 6).map(function(p, pi) {
-            return '<img data-photoid="' + p + '" onclick="openTimelineLightbox(\'' + photosEncoded + '\',' + pi + ')" '
+            return '<img data-photoid="' + esc(p) + '" onclick="openTimelineLightbox(\'' + photosEncoded + '\',' + pi + ')" '
               + 'style="width:60px;height:60px;object-fit:cover;border-radius:6px;border:1.5px solid var(--border);cursor:pointer;transition:opacity .15s" '
               + 'onmouseover="this.style.opacity=\'0.8\'" onmouseout="this.style.opacity=\'1\'">';
           }).join('')
@@ -3848,7 +4012,7 @@ function buildTimeline(r) {
     return '<div class="timeline-content' + (isCurrent ? ' current-eval' : '') + '">'
       + '<div class="timeline-header" onclick="toggleTimeline(\'' + uid + '\')">'
       +   '<div style="' + riskDot(ev.riskLevel) + ';width:10px;height:10px;border-radius:50%;flex-shrink:0"></div>'
-      +   '<div class="timeline-date">' + dateLabel + (isCurrent ? ' · <strong>Evaluación actual</strong>' : '') + '</div>'
+      +   '<div class="timeline-date">' + esc(dateLabel) + (isCurrent ? ' · <strong>Evaluación actual</strong>' : '') + '</div>'
       +   (ev.riskLevel ? '<span class="risk-badge ' + riskClass + '" style="font-size:8px;padding:1px 6px">' + riskLabel(ev.riskLevel, ev.riskScore) + '</span>' : '')
       +   '<span class="timeline-chevron" id="chev-' + uid + '">▼</span>'
       + '</div>'
@@ -3949,7 +4113,7 @@ function buildIntervencionSection(r) {
   var intervHtml = '';
   if (interv) {
     intervHtml = '<div class="detail-row"><div class="detail-key">Estado</div>'
-      + '<div class="detail-val"><span style="font-weight:700;font-size:12px;padding:3px 10px;border-radius:20px;' + (INTERV_STYLE[interv] || '') + '">' + (INTERV_LABEL_DETAIL[interv] || interv) + '</span></div></div>';
+      + '<div class="detail-val"><span style="font-weight:700;font-size:12px;padding:3px 10px;border-radius:20px;' + (INTERV_STYLE[interv] || '') + '">' + esc(INTERV_LABEL_DETAIL[interv] || interv) + '</span></div></div>';
   }
 
   // Lista de trabajos
@@ -3959,12 +4123,12 @@ function buildIntervencionSection(r) {
     trabajos.forEach(function(t, i) {
       trabajosHtml += '<div style="background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:6px;position:relative">'
         + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">'
-        +   '<span style="font-family:var(--mono);font-size:10px;color:var(--text3)">' + (t.fecha || '—') + '</span>'
-        +   '<span style="font-size:11px;font-weight:700;color:var(--accent);flex:1">' + (t.tipo || 'Trabajo') + '</span>'
+        +   '<span style="font-family:var(--mono);font-size:10px;color:var(--text3)">' + esc(t.fecha || '—') + '</span>'
+        +   '<span style="font-size:11px;font-weight:700;color:var(--accent);flex:1">' + esc(t.tipo || 'Trabajo') + '</span>'
         +   '<button type="button" onclick="deleteWork(\'' + r.id + '\',' + i + ')" style="background:none;border:none;color:var(--text3);font-size:14px;cursor:pointer;padding:0 2px" title="Eliminar">✕</button>'
         + '</div>'
-        + (t.descripcion ? '<div style="font-size:12px;color:var(--text2);margin-bottom:3px">' + t.descripcion + '</div>' : '')
-        + (t.responsable ? '<div style="font-size:11px;color:var(--text3)">👤 ' + t.responsable + '</div>' : '')
+        + (t.descripcion ? '<div style="font-size:12px;color:var(--text2);margin-bottom:3px">' + esc(t.descripcion) + '</div>' : '')
+        + (t.responsable ? '<div style="font-size:11px;color:var(--text3)">👤 ' + esc(t.responsable) + '</div>' : '')
         + '</div>';
     });
     trabajosHtml += '</div>';
@@ -5245,29 +5409,46 @@ async function exportPDFById(id) {
 <script>
 /* js/sync.js */
 // ============================================================
+// Copia de una ficha con TODAS sus fotos en base64 (evaluación, historial y
+// fotos de Ficha de Registro), para que el archivo sirva en otro teléfono.
+async function recordForExport(src) {
+  var r = Object.assign({}, src);
+  r.photos = await resolveForExport(r.photos);
+  if (r.registroPhotos && r.registroPhotos.length) {
+    var rps = [];
+    for (var k = 0; k < r.registroPhotos.length; k++) {
+      var p = r.registroPhotos[k];
+      if (!p) continue;
+      var resolved = await resolveForExport([p.id]);
+      rps.push({ id: resolved[0] || p.id, caption: p.caption || '' });
+    }
+    r.registroPhotos = rps;
+  }
+  if (r.evaluaciones && r.evaluaciones.length) {
+    var evs = [];
+    for (var j = 0; j < r.evaluaciones.length; j++) {
+      var ev = Object.assign({}, r.evaluaciones[j]);
+      ev.photos = await resolveForExport(ev.photos);
+      evs.push(ev);
+    }
+    r.evaluaciones = evs;
+  }
+  return r;
+}
+
 async function exportData() {
   showToast('Preparando backup…');
   // Resolve all photo IDs to base64 for a portable backup
   var exportRecords = [];
   for (var i = 0; i < records.length; i++) {
-    var r = Object.assign({}, records[i]);
-    r.photos = await resolveForExport(r.photos);
-    if (r.evaluaciones && r.evaluaciones.length) {
-      var evs = [];
-      for (var j = 0; j < r.evaluaciones.length; j++) {
-        var ev = Object.assign({}, r.evaluaciones[j]);
-        ev.photos = await resolveForExport(ev.photos);
-        evs.push(ev);
-      }
-      r.evaluaciones = evs;
-    }
-    exportRecords.push(r);
+    exportRecords.push(await recordForExport(records[i]));
   }
   const blob = new Blob([JSON.stringify(exportRecords, null, 2)], {type: 'application/json'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = 'arborrisk_backup_' + new Date().toISOString().split('T')[0] + '.json';
   a.click();
+  markBackupDone();
   showToast('Backup exportado (' + exportRecords.length + ' fichas)', 'success');
 }
 
@@ -5427,44 +5608,108 @@ async function exportProjectPDF() {
 
 function triggerImport() { document.getElementById('import-input').click(); }
 
+// IDs de ficha seguros: se usan dentro de onclick="...('id')". Los que genera
+// la app son timestamps; un archivo con otra cosa se descarta.
+function isSafeRecordId(id) {
+  return (typeof id === 'string' || typeof id === 'number') && /^[A-Za-z0-9_.:-]+$/.test(String(id));
+}
+
 function importData(input) {
   const file = input.files[0];
   if (!file) return;
+  input.value = '';
   const reader = new FileReader();
   reader.onload = e => {
-    showConfirm('¿Importar datos?', 'Esto reemplazará todos los registros actuales con los del archivo importado. Esta acción no se puede deshacer.', async () => {
+    // 1) Validar el archivo ANTES de tocar nada
+    var imported;
+    try {
+      const parsed = JSON.parse(e.target.result);
+      const list = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.records) ? parsed.records : null);
+      if (!list) throw new Error('formato');
+      imported = list.filter(r => r && isSafeRecordId(r.id));
+    } catch(err) {
+      showToast('Archivo inválido — verificá que sea un backup de ArborRisk', 'error');
+      return;
+    }
+    if (!imported.length) { showToast('El archivo no contiene fichas', 'error'); return; }
+
+    var msg = 'El archivo tiene ' + imported.length + ' ficha' + (imported.length !== 1 ? 's' : '') + '. '
+      + (records.length
+          ? 'Reemplazará las ' + records.length + ' que hay ahora en este teléfono. Antes se guarda una copia, así podés deshacerlo desde este mismo menú.'
+          : 'Este teléfono no tiene fichas cargadas.');
+    showConfirm('¿Restaurar backup?', msg, async () => {
       try {
-        const parsed = JSON.parse(e.target.result);
-        const imported = Array.isArray(parsed) ? parsed : (parsed.records || []);
-        if (!imported.length) { showToast('El archivo no contiene registros', 'error'); return; }
-        await dbClear();
-        for (const rec of imported) {
-          if (rec && rec.id) await dbPut(rec);
+        // 2) Copia de lo que hay ahora (si falla, no se restaura nada)
+        if (records.length) {
+          try { await dbPutSnapshot(records); }
+          catch(err) {
+            console.error('snapshot error:', err);
+            showToast('No se pudo guardar la copia previa — no se restauró nada', 'error');
+            return;
+          }
         }
-        records = imported.filter(r => r && r.id);
-        await migratePhotosToIDB();
-        await cleanupOrphanPhotos();
-        // Rebuild autocomplete
-        try { localStorage.removeItem('arborrisk_ac_especies'); } catch(e) {}
-        try { localStorage.removeItem('arborrisk_ac_clientes'); } catch(e) {}
-        records.forEach(function(r) {
-          saveAutocompleteValue('especies', r.especie);
-          saveAutocompleteValue('clientes', r.cliente);
-        });
-        applyFilters(); updateStorage();
-        if (currentTab === 'proyectos') renderProjects();
-        if (currentTab === 'mapa') renderMap();
-        if (currentTab === 'catastro') renderCatastro();
-        showToast(records.length + ' registros importados correctamente', 'success');
+        // 3) Reemplazo atómico
+        await dbReplaceAll(imported);
+        records = imported;
+        await afterRecordsReplaced();
+        showToast(records.length + ' fichas restauradas correctamente', 'success');
       } catch(err) {
         console.error('importData error:', err);
-        showToast('Archivo inválido — verificá que sea un backup de ArborRisk', 'error');
+        records = await dbGetAll().catch(() => records);
+        applyFilters(); updateStorage();
+        showToast('No se pudo restaurar — tus fichas quedaron como estaban', 'error');
       }
     });
   };
   reader.onerror = () => showToast('Error al leer el archivo', 'error');
   reader.readAsText(file);
-  input.value = '';
+}
+
+// Pasos comunes tras reemplazar todas las fichas (restaurar / deshacer)
+async function afterRecordsReplaced() {
+  await migratePhotosToIDB(true);
+  await cleanupOrphanPhotos();
+  try { localStorage.removeItem('arborrisk_ac_especies'); } catch(e) {}
+  try { localStorage.removeItem('arborrisk_ac_clientes'); } catch(e) {}
+  records.forEach(function(r) {
+    saveAutocompleteValue('especies', r.especie);
+    saveAutocompleteValue('clientes', r.cliente);
+  });
+  applyFilters(); updateStorage();
+  if (currentTab === 'proyectos') renderProjects();
+  if (currentTab === 'mapa') renderMap();
+  if (currentTab === 'catastro') renderCatastro();
+  refreshUndoRestoreButton();
+}
+
+// ── Deshacer la última restauración ──────────────────────────
+async function refreshUndoRestoreButton() {
+  var btn = document.getElementById('undo-restore-btn');
+  if (!btn) return;
+  var snap = await dbGetSnapshot();
+  if (!snap) { btn.style.display = 'none'; return; }
+  var when = snap.at ? new Date(snap.at).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+  btn.textContent = '↩️ Deshacer última restauración' + (when ? ' (' + when + ', ' + snap.count + ' fichas)' : '');
+  btn.style.display = '';
+}
+
+async function undoLastRestore() {
+  var snap = await dbGetSnapshot();
+  if (!snap || !Array.isArray(snap.records)) { showToast('No hay una restauración para deshacer', 'error'); return; }
+  showConfirm('¿Deshacer la restauración?',
+    'Vuelven las ' + snap.count + ' fichas que había antes de restaurar. Las fichas actuales se reemplazan (si las necesitás, seguís teniendo el archivo de backup).',
+    async () => {
+      try {
+        await dbReplaceAll(snap.records);
+        records = snap.records;
+        await dbDeletePhoto(SNAPSHOT_ID);
+        await afterRecordsReplaced();
+        showToast('Restauración deshecha: ' + records.length + ' fichas', 'success');
+      } catch(err) {
+        console.error('undoLastRestore error:', err);
+        showToast('No se pudo deshacer', 'error');
+      }
+    });
 }
 
 // ============================================================
@@ -5733,13 +5978,13 @@ function renderMap() {
       ? ' · 🔄 ' + (r.evaluaciones.length + 1) + ' eval.' : '';
 
     var popup = '<div class="map-popup">'
-      + '<div class="map-popup-code">' + (r.code || '—') + '  '
+      + '<div class="map-popup-code">' + esc(r.code || '—') + '  '
       + '<span style="background:' + riskColor + ';color:#fff;border-radius:10px;padding:1px 7px;font-size:9px;font-weight:700">' + riskLabel + '</span>'
       + '</div>'
-      + '<div class="map-popup-name">' + (r.especie || 'Sin especie') + '</div>'
+      + '<div class="map-popup-name">' + esc(r.especie || 'Sin especie') + '</div>'
       + '<div class="map-popup-meta">'
-      + (r.cliente || r.ubicacion ? '👤 ' + (r.cliente || r.ubicacion) + '<br>' : '')
-      + (r.fecha ? '📅 ' + r.fecha : '')
+      + (r.cliente || r.ubicacion ? '👤 ' + esc(r.cliente || r.ubicacion) + '<br>' : '')
+      + (r.fecha ? '📅 ' + esc(r.fecha) : '')
       + evalCount
       + '</div>'
       + '<button type="button" class="map-popup-btn" onclick="mapOpenDetail(\'' + r.id + '\')">Ver ficha completa →</button>'
@@ -5913,7 +6158,7 @@ function renderProjects() {
       + '<div class="project-card-header">'
       +   '<div class="project-folder-icon ' + folderIconClass + '">' + folderEmoji + '</div>'
       +   '<div class="project-info">'
-      +     '<div class="project-name">' + cliente + '</div>'
+      +     '<div class="project-name">' + esc(cliente) + '</div>'
       +     '<div class="project-meta">'
       +       (lastStr ? '<span>' + lastStr + '</span>' : '')
       +       (species.size > 0 ? '<span>' + species.size + ' especie' + (species.size > 1 ? 's' : '') + '</span>' : '')
@@ -5981,7 +6226,7 @@ function openProjectSheet(clienteId) {
       + '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px">'
       + speciesList.map(function(sp) {
           return '<span style="background:var(--low-bg);border:1.5px solid var(--low-border);border-radius:20px;padding:3px 10px;font-family:var(--mono);font-size:11px;color:var(--accent);font-style:italic;font-weight:600">'
-            + sp + (speciesMap[sp] > 1 ? ' ×' + speciesMap[sp] : '') + '</span>';
+            + esc(sp) + (speciesMap[sp] > 1 ? ' ×' + speciesMap[sp] : '') + '</span>';
         }).join('')
       + '</div>';
   }
@@ -6008,7 +6253,7 @@ function openProjectSheet(clienteId) {
       expiredStrip = '<div class="expiring-card-strip" style="border-top:1.5px solid var(--mod-border)">⚠ ' + es.label + '</div>';
     }
     var thumb = r.photos && r.photos[0]
-      ? '<img data-photoid="' + r.photos[0] + '" style="width:60px;height:60px;object-fit:cover;flex-shrink:0;border-radius:8px;border:1.5px solid var(--border)">'
+      ? '<img data-photoid="' + esc(r.photos[0]) + '" style="width:60px;height:60px;object-fit:cover;flex-shrink:0;border-radius:8px;border:1.5px solid var(--border)">'
       : '<div style="width:60px;height:60px;background:var(--surface2);border-radius:8px;border:1.5px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0">🌳</div>';
 
     fichasHtml += '<div style="background:var(--surface);border:2px solid var(--border);border-radius:var(--radius);overflow:hidden;cursor:pointer" onclick="closeProjectSheet();openDetail(\'' + r.id + '\')">'
@@ -6016,13 +6261,13 @@ function openProjectSheet(clienteId) {
       +   thumb
       +   '<div style="flex:1;min-width:0">'
       +     '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">'
-      +       '<span style="font-family:var(--mono);font-size:10px;color:var(--text3);font-weight:700">' + (r.code || '—') + '</span>'
+      +       '<span style="font-family:var(--mono);font-size:10px;color:var(--text3);font-weight:700">' + esc(r.code || '—') + '</span>'
       +       '<span class="risk-badge ' + riskClass + '" style="font-size:8px;padding:1px 6px">' + riskText + '</span>'
       +     '</div>'
-      +     '<div style="font-style:italic;font-weight:700;font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + (r.especie || 'Sin especie') + '</div>'
+      +     '<div style="font-style:italic;font-weight:700;font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(r.especie || 'Sin especie') + '</div>'
       +     '<div style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:2px">'
-      +       (r.fecha ? '📅 ' + r.fecha : '')
-      +       (r.vigencia ? ' · ⏱ ' + (VIGENCIA_LABEL[r.vigencia] || r.vigencia) : '')
+      +       (r.fecha ? '📅 ' + esc(r.fecha) : '')
+      +       (r.vigencia ? ' · ⏱ ' + esc(VIGENCIA_LABEL[r.vigencia] || r.vigencia) : '')
       +     '</div>'
       +   '</div>'
       + '</div>'
@@ -6121,7 +6366,7 @@ function renderCatastro() {
     + '<div style="padding:14px;display:flex;align-items:center;gap:12px">'
     + '<div style="font-size:32px">🌳</div>'
     + '<div style="flex:1">'
-    + '<div style="font-family:var(--head);font-size:18px;font-weight:700;color:var(--text)">' + proyectoLabel + '</div>'
+    + '<div style="font-family:var(--head);font-size:18px;font-weight:700;color:var(--text)">' + esc(proyectoLabel) + '</div>'
     + '<div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:2px">'
     + 'Actualizado: ' + new Date().toLocaleDateString('es', { day:'2-digit', month:'long', year:'numeric' })
     + '</div>'
@@ -6153,9 +6398,9 @@ function renderCatastro() {
     + '<div class="cat-section-title"><span>👤</span> Inspectores (' + inspectores.length + ')</div>';
   inspectores.forEach(function(ins) {
     inspHtml += '<div class="cat-inspector-row">'
-      + '<div class="cat-inspector-badge">' + ins.iniciales + '</div>'
+      + '<div class="cat-inspector-badge">' + esc(ins.iniciales) + '</div>'
       + '<div style="flex:1;min-width:0">'
-      + '<div class="cat-inspector-name">' + ins.iniciales + '</div>'
+      + '<div class="cat-inspector-name">' + esc(ins.iniciales) + '</div>'
       + '<div class="cat-inspector-sub">' + ins.total + ' árbol' + (ins.total!==1?'es':'') + (ins.registros ? ' · ' + ins.registros + ' reg.' : '') + '</div>'
       + '</div>'
       + '<div class="cat-inspector-stats">'
@@ -6202,7 +6447,7 @@ function renderCatastro() {
       especiesHtml += '<div class="cat-especie-row">'
         + '<div class="cat-especie-rank">' + (i+1) + '</div>'
         + '<div style="flex:1;min-width:0">'
-        + '<div class="cat-especie-name">' + entry[0] + '</div>'
+        + '<div class="cat-especie-name">' + esc(entry[0]) + '</div>'
         + '<div class="cat-especie-bar"><div class="cat-especie-bar-fill" style="width:' + pct + '%"></div></div>'
         + '</div>'
         + '<div class="cat-especie-count">' + entry[1] + '</div>'
@@ -6220,8 +6465,8 @@ function renderCatastro() {
       alertasHtml += '<div class="cat-alerta-row" onclick="openDetail(\'' + a.r.id + '\')">'
         + '<div class="cat-alerta-dot" style="background:' + a.color + '"></div>'
         + '<div class="cat-alerta-info">'
-        + '<div class="cat-alerta-code">' + (a.r.code||'—') + (a.r.gps ? ' · 📍' : '') + '</div>'
-        + '<div class="cat-alerta-especie">' + (a.r.especie||'Sin especie') + '</div>'
+        + '<div class="cat-alerta-code">' + esc(a.r.code||'—') + (a.r.gps ? ' · 📍' : '') + '</div>'
+        + '<div class="cat-alerta-especie">' + esc(a.r.especie||'Sin especie') + '</div>'
         + '<div class="cat-alerta-reason" style="color:' + a.color + '">' + a.reason + '</div>'
         + '</div>'
         + '<div class="cat-alerta-arrow">›</div>'
@@ -6515,6 +6760,7 @@ function openSyncMenu() {
       : 'Sin inspector configurado — tocá ⚙️ para configurar';
   }
   document.getElementById('sync-modal').classList.add('open');
+  refreshUndoRestoreButton();
 }
 
 function closeSyncMenu() {
@@ -6529,24 +6775,7 @@ async function exportCampo() {
   var cfg = getInspectorConfig();
   var exportRecords = [];
   for (var i = 0; i < records.length; i++) {
-    var r = Object.assign({}, records[i]);
-    r.photos = await resolveForExport(r.photos);
-    if (r.registroPhotos) {
-      r.registroPhotos = await Promise.all(r.registroPhotos.map(async function(p) {
-        var resolved = await resolveForExport([p.id]);
-        return { id: resolved[0] || p.id, caption: p.caption };
-      }));
-    }
-    if (r.evaluaciones && r.evaluaciones.length) {
-      var evs = [];
-      for (var j = 0; j < r.evaluaciones.length; j++) {
-        var ev = Object.assign({}, r.evaluaciones[j]);
-        ev.photos = await resolveForExport(ev.photos);
-        evs.push(ev);
-      }
-      r.evaluaciones = evs;
-    }
-    exportRecords.push(r);
+    exportRecords.push(await recordForExport(records[i]));
   }
 
   var payload = {
@@ -6567,6 +6796,7 @@ async function exportCampo() {
   a.href = URL.createObjectURL(blob);
   a.download = 'arborrisk_campo_' + prefijo + fecha + '.json';
   a.click();
+  markBackupDone();
   showToast('Exportado: ' + exportRecords.length + ' registros', 'success');
 }
 
@@ -6675,7 +6905,7 @@ function mergeImportData(input) {
 
       for (var i = 0; i < incoming.length; i++) {
         var inc = incoming[i];
-        if (!inc.id) { skipped.push(inc); continue; }
+        if (!inc || !isSafeRecordId(inc.id)) { skipped.push(inc || {}); continue; }
 
         if (!recordsMap[inc.id]) {
           // Registro nuevo — agregar
@@ -6706,7 +6936,7 @@ function mergeImportData(input) {
       }
 
       // Migrar fotos base64 de los nuevos registros a IDB
-      await migratePhotosToIDB();
+      await migratePhotosToIDB(true);
       await cleanupOrphanPhotos();
 
       applyFilters(); updateStorage();
@@ -6731,8 +6961,8 @@ function showMergeResult(meta, added, updated, skipped, conflicts) {
   var metaHtml = '';
   if (meta.inspector !== 'Archivo legacy') {
     metaHtml = '<div style="background:var(--surface2);border:1.5px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-family:var(--mono);font-size:11px">'
-      + '<div style="font-weight:700;color:var(--text);margin-bottom:4px">📁 ' + meta.inspector + (meta.iniciales ? ' (' + meta.iniciales + ')' : '') + '</div>'
-      + (meta.proyecto ? '<div style="color:var(--text3)">' + meta.proyecto + '</div>' : '')
+      + '<div style="font-weight:700;color:var(--text);margin-bottom:4px">📁 ' + esc(meta.inspector) + (meta.iniciales ? ' (' + esc(meta.iniciales) + ')' : '') + '</div>'
+      + (meta.proyecto ? '<div style="color:var(--text3)">' + esc(meta.proyecto) + '</div>' : '')
       + (meta.exportedAt ? '<div style="color:var(--text3)">Exportado: ' + new Date(meta.exportedAt).toLocaleString('es') + '</div>' : '')
       + '</div>';
   }
@@ -6756,7 +6986,7 @@ function showMergeResult(meta, added, updated, skipped, conflicts) {
   if (conflicts.length > 0) {
     conflictHtml = '<div style="font-family:var(--mono);font-size:10px;color:var(--mod);padding:4px 0">'
       + 'Los conflictos mantienen la versión local (más reciente). Códigos afectados: '
-      + conflicts.map(function(r) { return r.code || r.id; }).join(', ')
+      + esc(conflicts.map(function(r) { return r.code || r.id; }).join(', '))
       + '</div>';
   }
 
@@ -6837,7 +7067,7 @@ function printQRLabel() {
   var cfg = getInspectorConfig();
   var printHtml = '<!DOCTYPE html><html><head>'
     + '<meta charset="UTF-8">'
-    + '<title>Etiqueta — ' + (r.code || '') + '</title>'
+    + '<title>Etiqueta — ' + esc(r.code || '') + '</title>'
     + '<style>'
     + 'body{margin:0;padding:0;font-family:Arial,sans-serif;background:#fff}'
     + '.label{width:90mm;padding:6mm;border:1.5px solid #333;border-radius:4mm;'
@@ -6855,12 +7085,12 @@ function printQRLabel() {
     + '<div class="label">'
     + '<div class="qr-img">' + (qrDataUrl ? '<img src="' + qrDataUrl + '">' : '') + '</div>'
     + '<div class="info">'
-    + '<div class="code">' + (r.code || r.id) + '</div>'
-    + '<div class="especie">' + (r.especie || 'Sin especie') + '</div>'
+    + '<div class="code">' + esc(r.code || r.id) + '</div>'
+    + '<div class="especie">' + esc(r.especie || 'Sin especie') + '</div>'
     + '<div class="meta">'
-    + (r.fecha ? '📅 ' + r.fecha + '<br>' : '')
-    + (r.gps   ? '📍 ' + r.gps  + '<br>' : '')
-    + (cfg.proyecto ? cfg.proyecto : '')
+    + (r.fecha ? '📅 ' + esc(r.fecha) + '<br>' : '')
+    + (r.gps   ? '📍 ' + esc(r.gps)  + '<br>' : '')
+    + (cfg.proyecto ? esc(cfg.proyecto) : '')
     + '</div>'
     + '</div>'
     + '</div>'
