@@ -15,11 +15,17 @@
 //   - Nunca cacheamos respuestas redirigidas ni != 200 (mismo origen);
 //     para cross-origin aceptamos tambien respuestas opacas (no-cors).
 //
-//  Para forzar actualizacion tras un deploy: subir el CACHE_VERSION.
+//  Para forzar actualizacion tras un deploy: subir el CACHE_VERSION (lo
+//  estampa build.py solo). Solo renueva el app shell: libs y tiles viven en
+//  caches de nombre fijo y sobreviven a las actualizaciones.
 
 const CACHE_VERSION = 'arborrisk-20261008-144936';
-const RUNTIME_CACHE = CACHE_VERSION + '-cdn';    // libs + fuentes
-const TILE_CACHE    = CACHE_VERSION + '-tiles';  // tiles OSM (con tope)
+// Libs/fuentes y tiles van en caches de nombre FIJO (sin la version): asi
+// una actualizacion de la app no borra los mapas descargados ni deja la app
+// sin jsPDF/Leaflet si la proxima apertura es sin senal. Sus URLs son
+// inmutables (cdnjs versiona en la ruta), no hace falta renovarlas.
+const RUNTIME_CACHE = 'arborrisk-cdn';    // libs + fuentes
+const TILE_CACHE    = 'arborrisk-tiles';  // tiles OSM (con tope)
 const CURRENT_CACHES = [CACHE_VERSION, RUNTIME_CACHE, TILE_CACHE];
 
 const APP_SHELL = [
@@ -55,15 +61,36 @@ self.addEventListener('install', (event) => {
 });
 
 // -- Activate: limpiar caches viejos y tomar control ----------
-// Mantiene las 3 caches de la version actual; borra las de versiones
-// anteriores (incluyendo libs y tiles viejos).
+// Borra el app shell de versiones anteriores. Las caches viejas de libs y
+// tiles (de cuando llevaban la version en el nombre: '<version>-cdn' y
+// '<version>-tiles') se migran a las de nombre fijo antes de borrarlas,
+// para no perder las zonas ya descargadas.
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(keys.filter((k) => !CURRENT_CACHES.includes(k)).map((k) => caches.delete(k)));
+    for (const k of keys) {
+      if (CURRENT_CACHES.includes(k)) continue;
+      if (k.endsWith('-tiles')) await migrateCache(k, TILE_CACHE);
+      else if (k.endsWith('-cdn')) await migrateCache(k, RUNTIME_CACHE);
+      await caches.delete(k);
+    }
+    await trimCache(TILE_CACHE, TILE_MAX);
     await self.clients.claim();
   })());
 });
+
+// -- Helper: copiar entradas de una cache a otra (sin pisar) --
+async function migrateCache(fromName, toName) {
+  try {
+    const from = await caches.open(fromName);
+    const to = await caches.open(toName);
+    for (const req of await from.keys()) {
+      if (await to.match(req)) continue;
+      const res = await from.match(req);
+      if (res) await to.put(req, res);
+    }
+  } catch (e) { /* noop: en el peor caso se vuelve a descargar */ }
+}
 
 // -- Helper: cachear solo respuestas "sanas" (mismo origen) ---
 // 200, del mismo origen y NO redirigidas. Cachear una respuesta

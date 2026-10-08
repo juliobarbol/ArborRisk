@@ -104,7 +104,8 @@ Cada módulo arranca con un marcador `/* js/nombre.js */`. Saltá directo al ran
 - El SW es un archivo real: **`sw.js`**. `CACHE_VERSION` actual: **`arborrisk-v5`**. Estrategia: **network-first** en navegaciones + **cache-first** en el resto del mismo origen.
 - `APP_SHELL` (en `sw.js`) precachea `./`, `./index.html`, `./manifest.webmanifest`, `./icon.svg`. **Si agregás un archivo local nuevo, sumalo a `APP_SHELL`** o se rompe el offline.
 - **Cacheo de CDN:** el SW cachea cross-origin con cache-first (`CDN_HOSTS`: cdnjs, fonts.googleapis, fonts.gstatic).
-- **Tiles de OSM:** cache `…-tiles` con tope `TILE_MAX` (FIFO, 2500). Quedan offline los tiles ya vistos + los de las zonas descargadas.
+- **Tiles de OSM:** cache `arborrisk-tiles` con tope `TILE_MAX` (FIFO, 2500). Quedan offline los tiles ya vistos + los de las zonas descargadas.
+- **Caches de nombre fijo:** `arborrisk-cdn` (libs/fuentes) y `arborrisk-tiles` **no llevan la versión** en el nombre, así una actualización no borra las zonas descargadas ni deja la app sin jsPDF/Leaflet si se abre sin señal. Solo la cache del app shell (`CACHE_VERSION`) se renueva en cada deploy. El `activate` migra las caches viejas `<versión>-cdn`/`<versión>-tiles` a las fijas antes de borrarlas.
 - **Descargar zona (offline dirigido):** el botón "⬇ Descargar zona" (`downloadMapArea`) calcula los tiles de la vista actual para los zooms `[z, z+2]` y los manda al SW por `postMessage({type:'CACHE_TILES', urls}, [port])`.
 
 ## Flujo de despliegue (SEGUIR SIEMPRE)
