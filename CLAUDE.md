@@ -58,7 +58,7 @@ Cada módulo arranca con un marcador `/* js/nombre.js */`. Saltá directo al ran
 | `js/map.js` | 5876–6293 | Mapa Leaflet, clustering de marcadores, picker de GPS, **descarga de zona offline** (`downloadMapArea`/`runTileDownload`/`lngLatToTile`). |
 | `js/projects.js` | 6295–6712 | Agrupación de fichas por cliente/proyecto. |
 | `js/config.js` | 6714–7005 | Configuración (tema, datos del profesional, etc.). |
-| `js/qr.js` | 7007–7209 | Generación de etiquetas con **QR** por ficha. |
+| `js/qr.js` | 7007–7209 | Etiquetas **QR** — **inactivo**: sin botones ni librería (Julio no usa QR). Si se reactiva, volver a cargar qrcodejs en el `<head>`. |
 
 > Los rangos se mueven al editar. Si algo no cuadra, reubicá con
 > `grep -n "js/nombre.js" index.html` y leé el banner.
@@ -78,8 +78,8 @@ Cada módulo arranca con un marcador `/* js/nombre.js */`. Saltá directo al ran
   entre sí y se usan en `onclick="..."`. **No convertir a módulos ES** sin refactorizar los handlers.
 - **PWA con archivos reales:** `sw.js`, `manifest.webmanifest` e `icon.svg` son archivos separados.
   `setupPWA()` solo registra `./sw.js`.
-- Librerías externas por CDN (cdnjs): **jsPDF**, **Leaflet** + **markercluster**, **qrcodejs**,
-  tiles de **OpenStreetMap**. El SW las cachea para offline.
+- Librerías externas por CDN (cdnjs): **jsPDF**, **Leaflet** + **markercluster**, tiles de
+  **OpenStreetMap**. El SW las cachea para offline. (qrcodejs se quitó: Julio no usa QR.)
 
 ## Estructura de archivos
 
@@ -165,4 +165,6 @@ ARBOR_BASE_URL=http://127.0.0.1:8787 node test/pwa.test.cjs
 - **Ficha de riesgo**: el formulario principal sigue el esquema ISA adaptado para Argentina. No cambiar campos clave (especie, DAP, altura, nivel de riesgo) sin confirmar con Julio, ya que afecta los PDFs y los backups guardados.
 - **Fotos por ficha**: las fotos se guardan en IndexedDB como blobs referenciados por ID. El backup JSON las exporta en base64 para portabilidad. No cambiar este esquema sin migrar los datos existentes.
 - **Sin login / sin backend**: la app es intencionalmente sin cuentas. Todos los datos son locales. No agregar autenticación ni sync automático sin confirmación explícita de Julio.
-- **PDF individual y de proyecto**: el PDF de ficha individual incluye datos del profesional (configurados en `js/config.js`). El PDF de proyecto agrupa fichas del mismo cliente. Si cambia el formato, verificar los dos tipos.
+- **PDF**: todos los PDF (ficha de riesgo, ficha de registro, proyecto, catastro) muestran **nombre y matrícula** del profesional (`profesionalPDF()`, datos de ⚙️ Configuración: `nombre`, `matricula`): arriba a la derecha del encabezado y en la aclaración de la firma. El PDF de proyecto agrupa fichas del mismo cliente. Si cambia el formato, verificar todos.
+- **Trabaja solo**: no hay otros inspectores. El menú "BACKUP" muestra primero Backup / Restaurar; exportar/consolidar "de campo" y GeoJSON quedan en "Opciones avanzadas" (no borrar: sirven si algún día suma un colaborador).
+- **Sin QR**: no usa etiquetas QR; se sacaron el botón de escaneo, el botón QR del detalle y la librería.

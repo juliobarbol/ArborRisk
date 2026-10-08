@@ -25,7 +25,6 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 
 <!-- Estilos propios -->
 <style>
@@ -1124,9 +1123,9 @@
       <button type="button" class="icon-btn" onclick="openConfigModal()" title="Configuración del inspector">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
       </button>
-      <button type="button" class="icon-btn" onclick="openSyncMenu()" title="Exportar / Importar / GeoJSON">
+      <button type="button" class="icon-btn" onclick="openSyncMenu()" title="Respaldo de datos">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 7h12M8 12h12M8 17h12M3 7h.01M3 12h.01M3 17h.01"/></svg>
-        SYNC
+        BACKUP
       </button>
     </div>
   </div>
@@ -1168,7 +1167,6 @@
     <button type="button" class="filter-btn" id="filter-mod-btn" onclick="toggleFilterRisk('mod')">🟠 Mod</button>
     <button type="button" class="filter-btn" id="filter-expired-btn" onclick="toggleFilterRisk('expired')">⏰ Venc.</button>
     <button type="button" class="filter-btn" id="filter-pendiente-btn" onclick="toggleFilterIntervencion('pendiente')">🔧 Pend.</button>
-    <button type="button" class="filter-btn" id="scan-qr-btn" onclick="openQRScan()" title="Escanear código QR de árbol">📷 QR</button>
     <select class="filter-btn" id="filter-cliente-select" onchange="applyFilters()" style="font-family:var(--mono);font-size:10px;cursor:pointer;appearance:none;padding-right:8px">
       <option value="">👤 Todos</option>
     </select>
@@ -1927,8 +1925,12 @@
     <h3 style="font-family:var(--head);font-size:18px;margin-bottom:14px">⚙️ Configuración</h3>
 
     <div style="margin-bottom:12px">
-      <label class="field-label">Nombre del inspector</label>
+      <label class="field-label">Nombre y apellido (sale en los PDF)</label>
       <input class="field-input" id="cfg-nombre" type="text" placeholder="Ej: Julio Rodríguez" style="margin-top:4px">
+    </div>
+    <div style="margin-bottom:12px">
+      <label class="field-label">Matrícula profesional (sale en los PDF)</label>
+      <input class="field-input" id="cfg-matricula" type="text" placeholder="Ej: CIAFA 1234" style="margin-top:4px">
     </div>
     <div style="margin-bottom:12px">
       <label class="field-label">Iniciales (prefijo de códigos)</label>
@@ -1951,25 +1953,14 @@
 <div class="confirm-modal" id="sync-modal" style="z-index:500">
   <div class="confirm-box" style="max-width:340px;width:90%;padding:0;overflow:hidden">
     <div style="padding:14px 16px;background:var(--surface2);border-bottom:2px solid var(--border)">
-      <div style="font-family:var(--head);font-size:16px;font-weight:700">🔄 Sincronización</div>
+      <div style="font-family:var(--head);font-size:16px;font-weight:700">💾 Respaldo de datos</div>
       <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:2px" id="sync-inspector-label"></div>
     </div>
     <div style="padding:12px 16px;display:flex;flex-direction:column;gap:8px">
 
-      <div style="font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:2px">Exportar</div>
-      <button type="button" class="btn-save" style="justify-content:flex-start;gap:10px;font-size:12px" onclick="exportCampo();closeSyncMenu()">
-        📤 Exportar mis registros (campo)
-      </button>
-      <button type="button" class="btn-save" style="justify-content:flex-start;gap:10px;font-size:12px;background:var(--surface2);color:var(--text2);border:2px solid var(--border)" onclick="exportGeoJSON();closeSyncMenu()">
-        🗺 Exportar GeoJSON (SIG/QGIS)
-      </button>
-      <button type="button" class="btn-save" style="justify-content:flex-start;gap:10px;font-size:12px;background:var(--surface2);color:var(--text2);border:2px solid var(--border)" onclick="exportData();closeSyncMenu()">
-        💾 Backup completo (JSON)
-      </button>
-
-      <div style="font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-top:6px;margin-bottom:2px">Importar</div>
-      <button type="button" class="btn-save" style="justify-content:flex-start;gap:10px;font-size:12px;background:#0097a7;border-color:#0097a7" onclick="triggerMergeImport();closeSyncMenu()">
-        📥 Consolidar registros de campo
+      <div style="font-family:var(--mono);font-size:9px;color:var(--text3);line-height:1.4;margin-bottom:2px">Tus fichas y fotos viven solo en este teléfono. Hacé un backup seguido y guardá el archivo fuera del teléfono (Drive, mail, computadora).</div>
+      <button type="button" class="btn-save" style="justify-content:flex-start;gap:10px;font-size:12px" onclick="exportData();closeSyncMenu()">
+        💾 Hacer backup completo
       </button>
       <button type="button" class="btn-save" style="justify-content:flex-start;gap:10px;font-size:12px;background:var(--surface2);color:var(--text2);border:2px solid var(--border)" onclick="triggerImport();closeSyncMenu()">
         ♻️ Restaurar backup completo
@@ -1977,6 +1968,21 @@
       <button type="button" class="btn-save" id="undo-restore-btn" style="display:none;justify-content:flex-start;gap:10px;font-size:11px;background:var(--surface2);color:var(--text2);border:2px dashed var(--border)" onclick="closeSyncMenu();undoLastRestore()">
         ↩️ Deshacer última restauración
       </button>
+
+      <details style="margin-top:6px">
+        <summary style="font-family:var(--mono);font-size:10px;color:var(--text3);cursor:pointer;padding:4px 0">Opciones avanzadas</summary>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
+          <button type="button" class="btn-save" style="justify-content:flex-start;gap:10px;font-size:12px;background:var(--surface2);color:var(--text2);border:2px solid var(--border)" onclick="exportGeoJSON();closeSyncMenu()">
+            🗺 Exportar GeoJSON (SIG/QGIS)
+          </button>
+          <button type="button" class="btn-save" style="justify-content:flex-start;gap:10px;font-size:12px;background:var(--surface2);color:var(--text2);border:2px solid var(--border)" onclick="exportCampo();closeSyncMenu()">
+            📤 Exportar registros de campo (para otro inspector)
+          </button>
+          <button type="button" class="btn-save" style="justify-content:flex-start;gap:10px;font-size:12px;background:var(--surface2);color:var(--text2);border:2px solid var(--border)" onclick="triggerMergeImport();closeSyncMenu()">
+            📥 Consolidar registros de otro inspector
+          </button>
+        </div>
+      </details>
 
     </div>
     <div style="padding:10px 16px;border-top:2px solid var(--border)">
@@ -3092,6 +3098,15 @@ async function exportRegistroPDF(id) {
       doc.setFontSize(7);
       doc.text('FICHA DE REGISTRO DE ÁRBOL  ·  Relevamiento e Inventario', 10, 28);
       doc.text('Fecha de emisión: ' + new Date().toLocaleDateString('es-AR', {day:'2-digit',month:'long',year:'numeric'}), 10, 34);
+      var prof = profesionalPDF();
+      if (prof.nombre) {
+        doc.setTextColor(232, 244, 246); doc.setFontSize(10); doc.setFont('helvetica','bold');
+        doc.text(prof.nombre, W - M, 14, { align: 'right' });
+        if (prof.matricula) {
+          doc.setTextColor(120, 200, 215); doc.setFontSize(8); doc.setFont('helvetica','normal');
+          doc.text(prof.matricula, W - M, 21, { align: 'right' });
+        }
+      }
     } else {
       doc.setTextColor.apply(doc, TEALL);
       doc.setFontSize(8); doc.setFont('helvetica','bold');
@@ -3265,7 +3280,7 @@ async function exportRegistroPDF(id) {
   doc.line(M + 8, y + 26, M + 90, y + 26);
   doc.setTextColor.apply(doc, GREY);
   doc.setFontSize(6.5); doc.setFont('helvetica','normal');
-  doc.text('Firma y aclaración', M + 8, y + 30);
+  doc.text(profesionalPDF().linea ? 'Firma  ·  ' + profesionalPDF().linea : 'Firma y aclaración', M + 8, y + 30);
   doc.line(M + 100, y + 26, M + CW - 4, y + 26);
   doc.text('Fecha', M + 100, y + 30);
   y += 40;
@@ -3484,6 +3499,14 @@ function getInspectorConfig() {
   try {
     return JSON.parse(localStorage.getItem('arborrisk_config') || '{}');
   } catch(e) { return {}; }
+}
+
+// Datos del profesional para los PDF: nombre, "Mat. …" y la línea combinada.
+function profesionalPDF() {
+  var cfg = getInspectorConfig();
+  var nombre = (cfg.nombre || '').trim();
+  var matricula = (cfg.matricula || '').trim() ? 'Mat. ' + cfg.matricula.trim() : '';
+  return { nombre: nombre, matricula: matricula, linea: [nombre, matricula].filter(Boolean).join('  ·  ') };
 }
 
 function getInspectorPrefix() {
@@ -3841,8 +3864,6 @@ async function openDetail(id) {
       + '<button type="button" class="btn-save" style="font-size:13px" onclick="editFromDetail()">✏ Editar</button>'
       + '<button type="button" class="icon-btn" style="padding:10px 12px;background:var(--surface2);border:2px solid var(--border);color:var(--text2);flex-shrink:0" onclick="exportPDF()">📄 PDF</button>';
   }
-  // Inyectar botón QR
-  injectQRButton(id);
   // Lazy-load timeline photo thumbnails
   lazyLoadCardThumbs();
   document.getElementById('detail-overlay').classList.add('open');
@@ -3954,8 +3975,6 @@ async function openDetailRegistro(r) {
       '<button type="button" class="btn-save" style="font-size:13px;background:#0097a7" onclick="openFormRegistro(\'' + esc(r.id) + '\');closeDetail()">✏ Editar</button>'
       + '<button type="button" class="icon-btn" style="padding:10px 12px;background:var(--surface2);border:2px solid var(--border);color:var(--text2);flex-shrink:0" onclick="exportRegistroPDF(\'' + esc(r.id) + '\')">📄 PDF</button>';
   }
-  // Inyectar botón QR
-  injectQRButton(r.id);
   document.getElementById('detail-overlay').classList.add('open');
 }
 
@@ -5023,6 +5042,15 @@ async function exportPDFById(id) {
       doc.setFontSize(7);
       doc.text('INFORME DE EVALUACIÓN DE RIESGO ARBÓREO  ·  Metodología ISA / ANSI A300', 10, 28);
       doc.text('Fecha de emisión: ' + new Date().toLocaleDateString('es-AR', {day:'2-digit',month:'long',year:'numeric'}), 10, 34);
+      var prof = profesionalPDF();
+      if (prof.nombre) {
+        doc.setTextColor(232, 242, 232); doc.setFontSize(10); doc.setFont('helvetica','bold');
+        doc.text(prof.nombre, W - M, 14, { align: 'right' });
+        if (prof.matricula) {
+          doc.setTextColor(140,190,145); doc.setFontSize(8); doc.setFont('helvetica','normal');
+          doc.text(prof.matricula, W - M, 21, { align: 'right' });
+        }
+      }
     } else {
       doc.setTextColor.apply(doc, GREENL);
       doc.setFontSize(8); doc.setFont('helvetica','bold');
@@ -5299,7 +5327,7 @@ async function exportPDFById(id) {
   doc.line(M + 8, y + 26, M + 90, y + 26);
   doc.setTextColor.apply(doc, GREY);
   doc.setFontSize(6.5); doc.setFont('helvetica','normal');
-  doc.text('Firma y aclaración', M + 8, y + 30);
+  doc.text(profesionalPDF().linea ? 'Firma  ·  ' + profesionalPDF().linea : 'Firma y aclaración', M + 8, y + 30);
   // Date line
   doc.line(M + 100, y + 26, M + CW - 4, y + 26);
   doc.text('Fecha', M + 100, y + 30);
@@ -5523,6 +5551,11 @@ async function exportProjectPDF() {
     doc.text('Informe de proyecto  ·  ' + group.fichas.length + ' fichas  ·  Ficha ' + (fi+1) + ' de ' + group.fichas.length, 10, 18);
     doc.setTextColor(80,110,82);
     doc.text('Generado: ' + new Date().toLocaleDateString('es-AR', {day:'2-digit',month:'long',year:'numeric'}), 10, 24);
+    if (profesionalPDF().linea) {
+      doc.setTextColor(200, 225, 202); doc.setFontSize(7.5); doc.setFont('helvetica','bold');
+      doc.text(profesionalPDF().linea, W - M, 24, { align: 'right' });
+      doc.setFont('helvetica','normal');
+    }
     y = 34;
 
     // Risk badge
@@ -6529,7 +6562,7 @@ async function exportCatastroPDF() {
       doc.setFontSize(7);
       doc.text(cfg.proyecto || 'Relevamiento de arbolado urbano', 10, 28);
       doc.text('Informe generado: ' + new Date().toLocaleDateString('es-AR',{day:'2-digit',month:'long',year:'numeric'}), 10, 34);
-      if (cfg.nombre) doc.text('Coordinador: ' + cfg.nombre, 10, 39);
+      if (profesionalPDF().linea) doc.text('Responsable: ' + profesionalPDF().linea, 10, 39);
     } else {
       doc.setTextColor.apply(doc, GREENL);
       doc.setFontSize(8); doc.setFont('helvetica','bold');
@@ -6717,6 +6750,7 @@ function openConfigModal() {
   var cfg = getInspectorConfig();
   document.getElementById('cfg-nombre').value = cfg.nombre || '';
   document.getElementById('cfg-iniciales').value = cfg.iniciales || '';
+  document.getElementById('cfg-matricula').value = cfg.matricula || '';
   document.getElementById('cfg-proyecto').value = cfg.proyecto || '';
   document.getElementById('config-modal').classList.add('open');
 }
@@ -6729,8 +6763,9 @@ function saveConfig() {
   var nombre    = document.getElementById('cfg-nombre').value.trim();
   var iniciales = document.getElementById('cfg-iniciales').value.trim().toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,4);
   var proyecto  = document.getElementById('cfg-proyecto').value.trim();
-  if (!nombre) { showToast('Ingresá un nombre de inspector', 'error'); return; }
-  var cfg = { nombre, iniciales, proyecto };
+  var matricula = document.getElementById('cfg-matricula').value.trim();
+  if (!nombre) { showToast('Ingresá tu nombre', 'error'); return; }
+  var cfg = Object.assign(getInspectorConfig(), { nombre, iniciales, proyecto, matricula });
   try { localStorage.setItem('arborrisk_config', JSON.stringify(cfg)); } catch(e) {}
   closeConfigModal();
   updateHeaderInspector();
