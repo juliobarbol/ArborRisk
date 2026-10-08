@@ -19,7 +19,7 @@
 //  estampa build.py solo). Solo renueva el app shell: libs y tiles viven en
 //  caches de nombre fijo y sobreviven a las actualizaciones.
 
-const CACHE_VERSION = 'arborrisk-20261008-155418';
+const CACHE_VERSION = 'arborrisk-20261008-170225';
 // Libs/fuentes y tiles van en caches de nombre FIJO (sin la version): asi
 // una actualizacion de la app no borra los mapas descargados ni deja la app
 // sin jsPDF/Leaflet si la proxima apertura es sin senal. Sus URLs son
