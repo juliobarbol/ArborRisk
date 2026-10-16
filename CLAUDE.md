@@ -4,8 +4,9 @@
 > Esta guía es el mapa del proyecto: leela primero para no escanear las ~7.000 líneas del `index.html`.
 
 ## Qué es
-- PWA instalable, **offline-first**, sin login, pensada para usar desde el celular en campo.
-- Los datos (fichas + fotos) viven en **IndexedDB** del dispositivo (`ArborRiskDB`); las preferencias y el borrador en **`localStorage`**. No hay backend.
+- PWA instalable, **offline-first**, pensada para usar desde el celular en campo. Login solo para la nube (opcional).
+- Los datos (fichas + fotos) viven en **IndexedDB** del dispositivo (`ArborRiskDB`); las preferencias y el borrador en **`localStorage`**.
+- **Nube opcional (Supabase):** con sesión iniciada, las fichas y fotos se sincronizan entre dispositivos (ver sección *Nube*). Sin sesión, la app funciona igual que siempre, 100% local.
 - Backup/restore manual vía **JSON** (export/import). Las fotos se resuelven a base64 dentro del JSON para que el backup sea portable.
 - Se publica en **Cloudflare** (mismo esquema que la app de presupuestos: repo en GitHub → Cloudflare despliega solo).
 
@@ -18,9 +19,10 @@
 
 ## Estructura de archivos
 - `index.html` — **toda la app** (markup + `<style>` + `<script>`).
-- `sw.js` — Service Worker (offline + actualizaciones). **`CACHE_VERSION` actual: `arborrisk-v7`**.
+- `sw.js` — Service Worker (offline + actualizaciones). **`CACHE_VERSION` actual: `arborrisk-v8`**.
 - `manifest.webmanifest` — manifest PWA (instalación).
 - `icon.svg` — icono vectorial (usado por el manifest y como `apple-touch-icon`/`favicon`).
+- `supabase/migrations/` — esquema del servidor (tablas, RLS, `sync_push`, bucket de fotos). `supabase/README.md` — cómo crear una instancia nueva y correr el test de nube.
 - `CLAUDE.md` — esta guía.
 
 ## Mapa del código dentro de `index.html`
@@ -37,7 +39,7 @@ grep -nE "css/[a-z]+\.css|js/[a-z]+\.js" index.html
 | `css/base.css` | Variables de tema (claro/oscuro), reset, tipografías |
 | `css/components.css` | Componentes de UI (tarjetas, formularios, badges de riesgo, lightbox) |
 | `css/map.css` | Estilos del mapa (Leaflet) |
-| `js/db.js` | **IndexedDB** (`ArborRiskDB`, v2). Stores `records` y `photos`. Helpers `dbPutPhoto`/`dbGetPhoto`/`dbDeletePhoto` |
+| `js/db.js` | **IndexedDB** (`ArborRiskDB`, **v3**). Stores `records`, `photos`, `outbox` (cambios pendientes de subir) y `nube_fotos` (fotos ya subidas). Helpers `dbPutPhoto`/`dbGetPhoto`/`dbDeletePhoto`, `idbAll/idbGet/idbPut/idbDelete` |
 | `js/state.js` | Estado global (`records`, `currentId`, `currentPhotos`, filtros, sort), autocompletar clientes/especies |
 | `js/ui.js` | Render de listas/tarjetas, pestañas, vista de detalle, lightbox de fotos |
 | `js/forms.js` | Formularios de evaluación (carga de la ficha de riesgo) |
@@ -47,6 +49,7 @@ grep -nE "css/[a-z]+\.css|js/[a-z]+\.js" index.html
 | `js/map.js` | Mapa Leaflet, clustering de marcadores, picker de GPS, **descarga de zona offline** (`downloadMapArea`/`runTileDownload`/`lngLatToTile`) |
 | `js/projects.js` | Agrupación de fichas por cliente/proyecto |
 | `js/config.js` | Configuración (tema, datos del profesional, etc.), export de campo, **GeoJSON**, **CSV** (`exportCSV`, `;` + coma decimal para Excel AR) y **consolidación** (`mergeImportData`) |
+| `js/nube.js` | **Sincronización con Supabase** por REST (sin SDK): login/registro, `nubeSync` (push por `sync_push` + pull incremental), fotos al Storage, roles, modal ☁ e indicador del header |
 | `js/qr.js` | Generación de etiquetas con **QR** por ficha |
 
 ## Convenciones importantes
@@ -66,8 +69,18 @@ grep -nE "css/[a-z]+\.css|js/[a-z]+\.js" index.html
 - **Lista paginada:** `renderList()` muestra `LIST_PAGE_SIZE` tarjetas y un botón "Mostrar más"; no volver a insertar todas.
 - **Niveles de riesgo:** bajo / moderado / alto, con colores en variables CSS (`--low`, `--mod`, `--high`).
 
+## Nube (Supabase) — detalles que no romper
+- **Instancia = proyecto de Supabase.** La predeterminada está en `NUBE_DEFAULT` (`js/nube.js`); se puede cambiar desde el modal ☁ → "Cambiar servidor". La clave publicable es pública por diseño: la seguridad está en RLS y en las funciones del servidor.
+- **Escritura local siempre por `dbPut`/`dbDelete`:** con sesión, encolan el cambio en `outbox` **en la misma transacción**. Lo que viene de la nube se aplica con `{ noSync: true }` (si no, se reenviaría).
+- **`updatedAt` decide los conflictos** (gana el más reciente, por ficha). Al modificar una ficha usar **`marcaTiempo(prev.updatedAt)`**, nunca `new Date()` a secas: evita que un dispositivo con el reloj adelantado gane siempre.
+- **Borrados:** son lógicos en el servidor (`deleted_at`) y se propagan. Un relevador solo borra lo que cargó; si no puede, la ficha se restaura.
+- **Pull incremental** por `server_updated_at` (cursor en `localStorage`, por servidor+usuario) releyendo 1 minuto hacia atrás; aplicar una fila dos veces es inocuo.
+- **Fotos:** se suben al bucket privado `fotos` con su ID como ruta y se bajan a demanda desde `resolvePhotoUrl`.
+- **Antes de iniciar sesión no se encola nada.** Al primer ingreso se ofrece subir las fichas locales (`nubeOfrecerSubirLocales`).
+- **Cambios de esquema:** nueva migración numerada en `supabase/migrations/` (nunca editar una ya aplicada en un municipio).
+
 ## PWA / Service Worker (detalles que no romper)
-- El SW es un archivo real: **`sw.js`**. `CACHE_VERSION` actual: **`arborrisk-v7`** (constante arriba de `sw.js`). Estrategia: **network-first** en navegaciones (con timeout y fallback a caché) + **cache-first** en el resto del mismo origen. Mismo patrón que el `sw.js` de presupuestos.
+- El SW es un archivo real: **`sw.js`**. `CACHE_VERSION` actual: **`arborrisk-v8`** (constante arriba de `sw.js`). Estrategia: **network-first** en navegaciones (con timeout y fallback a caché) + **cache-first** en el resto del mismo origen. Mismo patrón que el `sw.js` de presupuestos.
 - `APP_SHELL` (en `sw.js`) precachea `./`, `./index.html`, `./manifest.webmanifest`, `./icon.svg`. **Si agregás un archivo local nuevo, sumalo a `APP_SHELL`** o se rompe el offline.
 - **Cacheo de CDN (offline total):** el SW cachea cross-origin con **cache-first**:
   - `CDN_HOSTS` (`cdnjs.cloudflare.com`, `fonts.googleapis.com`, `fonts.gstatic.com`) → cache `…-cdn`. Cubre jsPDF, Leaflet, markercluster, QR y las fuentes. Se cachean **en la primera carga online**; después funcionan offline.
@@ -100,6 +113,11 @@ PY
 node test/pwa.test.cjs
 ```
 Parsea el `CACHE_VERSION` de `sw.js`, así que no hay que tocarlo al subir la versión.
+
+Test de punta a punta de la nube (necesita un proyecto Supabase **de prueba** y usuarios de prueba; ver `supabase/README.md`):
+```bash
+NUBE_RELEV1=email:pass NUBE_RELEV2=email:pass NUBE_CONSULTA=email:pass NUBE_PROXY="$HTTPS_PROXY" node test/nube.test.cjs
+```
 
 Test de comportamiento del catastro (XSS al consolidar, IDs inválidos, paginación, UUID, GPS/autoría, CSV/GeoJSON, catálogo de especies, vínculo árbol↔evaluación, conteo por árbol, migración y fotos consolidadas):
 ```bash

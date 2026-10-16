@@ -661,6 +661,12 @@
 
   @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
   .arb-card { animation: fadeUp .2s ease both; }
+  .nube-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-left: 6px; vertical-align: middle; }
+  .nube-dot.off { display: none; }
+  .nube-dot.ok { background: #4caf50; }
+  .nube-dot.pend { background: #ffb300; }
+  .nube-dot.err { background: #e53935; }
+  .nube-aviso { font-size: 12px; padding: 8px 10px; border-radius: 8px; background: var(--surface2); border: 1.5px solid var(--border); color: var(--text2); margin-bottom: 10px; }
   .list-more { display: block; width: 100%; margin: 4px 0 12px; padding: 12px; background: var(--surface2); border: 2px dashed var(--border); border-radius: var(--radius); color: var(--accent); font-family: var(--mono); font-size: 12px; font-weight: 700; cursor: pointer; }
 
   /* THEME TOGGLE */
@@ -1119,7 +1125,7 @@
       </button>
       <button type="button" class="icon-btn" onclick="openSyncMenu()" title="Exportar / Importar / GeoJSON">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 7h12M8 12h12M8 17h12M3 7h.01M3 12h.01M3 17h.01"/></svg>
-        SYNC
+        SYNC<span id="nube-dot" class="nube-dot off" title="Nube: sin sesión"></span>
       </button>
     </div>
   </div>
@@ -1994,6 +2000,17 @@
   </div>
 </div>
 
+<!-- MODAL NUBE -->
+<div class="confirm-modal" id="nube-modal" style="z-index:510">
+  <div class="confirm-box" style="max-width:380px;width:92%;max-height:88vh;overflow:auto;text-align:left">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <h3 style="font-family:var(--head);font-size:18px;margin:0">☁ Nube del equipo</h3>
+      <button type="button" class="close-btn" style="color:var(--text2);background:var(--surface2);border-color:var(--border)" onclick="closeNubeModal()" aria-label="Cerrar">✕</button>
+    </div>
+    <div id="nube-body"></div>
+  </div>
+</div>
+
 <!-- MENÚ SYNC -->
 <div class="confirm-modal" id="sync-modal" style="z-index:500">
   <div class="confirm-box" style="max-width:340px;width:90%;padding:0;overflow:hidden">
@@ -2003,7 +2020,12 @@
     </div>
     <div style="padding:12px 16px;display:flex;flex-direction:column;gap:8px">
 
-      <div style="font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:2px">Exportar</div>
+      <div style="font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:2px">Nube</div>
+      <button type="button" class="btn-save" style="justify-content:flex-start;gap:10px;font-size:12px;background:var(--accent);border-color:var(--accent)" onclick="openNubeModal()">
+        ☁ Nube del equipo (sincronizar)
+      </button>
+
+      <div style="font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-top:6px;margin-bottom:2px">Exportar</div>
       <button type="button" class="btn-save" style="justify-content:flex-start;gap:10px;font-size:12px" onclick="exportCampo();closeSyncMenu()">
         📤 Exportar mis registros (campo)
       </button>
@@ -2115,7 +2137,10 @@
 // ============================================================
 // DB — IndexedDB
 // ============================================================
-const DB_NAME = 'ArborRiskDB', DB_VER = 2, STORE = 'records', PHOTO_STORE = 'photos';
+const DB_NAME = 'ArborRiskDB', DB_VER = 3, STORE = 'records', PHOTO_STORE = 'photos';
+// v3 (nube): OUTBOX = cambios pendientes de subir { id, deleted, tipo, ts };
+//            NUBE_FOTOS = IDs de fotos que ya están en el Storage de la nube.
+const OUTBOX = 'outbox', NUBE_FOTOS = 'nube_fotos';
 var db = null;
 
 function initDB() {
@@ -2127,6 +2152,9 @@ function initDB() {
       if (!d.objectStoreNames.contains(STORE)) d.createObjectStore(STORE, { keyPath: 'id' });
       // v2: photos object store
       if (!d.objectStoreNames.contains(PHOTO_STORE)) d.createObjectStore(PHOTO_STORE, { keyPath: 'id' });
+      // v3: sincronización con la nube
+      if (!d.objectStoreNames.contains(OUTBOX)) d.createObjectStore(OUTBOX, { keyPath: 'id' });
+      if (!d.objectStoreNames.contains(NUBE_FOTOS)) d.createObjectStore(NUBE_FOTOS, { keyPath: 'id' });
     };
     req.onsuccess = function(e) { db = e.target.result; res(); };
     req.onerror   = function() { rej(req.error); };
@@ -2204,6 +2232,8 @@ async function resolvePhotoUrl(ref) {
   if (_blobUrlCache[ref]) return _blobUrlCache[ref];
   try {
     var blob = await dbGetPhoto(ref);
+    // Foto de una ficha bajada de la nube que todavía no está en este dispositivo
+    if (!blob && typeof nubeBajarFoto === 'function') blob = await nubeBajarFoto(ref);
     if (!blob) return null;
     var url = URL.createObjectURL(blob);
     _blobUrlCache[ref] = url;
@@ -2343,26 +2373,81 @@ function dbGetAll() {
   });
 }
 
-function dbPut(record) {
+// Guarda una ficha. Si hay sesión en la nube, la encola para subir en la MISMA
+// transacción (no se puede perder un cambio entre guardar y encolar).
+// opts.noSync: lo usa la descarga desde la nube (no debe volver a subir lo que bajó).
+function dbPut(record, opts) {
   if (!db) return Promise.resolve();
+  var encolar = !(opts && opts.noSync) && typeof nubeSesion === 'function' && !!nubeSesion();
   return new Promise(function(res, rej) {
     try {
-      var tx  = db.transaction(STORE, 'readwrite');
-      var req = tx.objectStore(STORE).put(record);
-      req.onsuccess = function() { res(); };
-      req.onerror   = function() { rej(req.error); };
+      var tx  = db.transaction(encolar ? [STORE, OUTBOX] : STORE, 'readwrite');
+      tx.objectStore(STORE).put(record);
+      if (encolar) tx.objectStore(OUTBOX).put({ id: record.id, deleted: false, tipo: record.tipo === 'registro' ? 'registro' : 'riesgo', ts: Date.now() });
+      tx.oncomplete = function() { res(); if (encolar) nubeProgramarSync(); };
+      tx.onerror    = function() { rej(tx.error); };
+      tx.onabort    = function() { rej(tx.error); };
     } catch(e) { rej(e); }
   });
 }
 
-function dbDelete(id) {
+// Borra una ficha. Con sesión en la nube deja un borrado pendiente (se propaga a los demás dispositivos).
+function dbDelete(id, opts) {
+  if (!db) return Promise.resolve();
+  var encolar = !(opts && opts.noSync) && typeof nubeSesion === 'function' && !!nubeSesion();
+  return new Promise(function(res, rej) {
+    try {
+      var tx  = db.transaction(encolar ? [STORE, OUTBOX] : STORE, 'readwrite');
+      tx.objectStore(STORE).delete(id);
+      var prev = encolar && typeof records !== 'undefined' ? records.find(function(r) { return r.id === id; }) : null;
+      if (encolar) tx.objectStore(OUTBOX).put({ id: id, deleted: true, updated_at: marcaTiempo(prev && prev.updatedAt), ts: Date.now() });
+      tx.oncomplete = function() { res(); if (encolar) nubeProgramarSync(); };
+      tx.onerror    = function() { rej(tx.error); };
+      tx.onabort    = function() { rej(tx.error); };
+    } catch(e) { rej(e); }
+  });
+}
+
+// ── Helpers genéricos para los stores de la nube ──
+function idbAll(storeName) {
+  if (!db) return Promise.resolve([]);
+  return new Promise(function(res, rej) {
+    try {
+      var req = db.transaction(storeName, 'readonly').objectStore(storeName).getAll();
+      req.onsuccess = function() { res(req.result || []); };
+      req.onerror   = function() { rej(req.error); };
+    } catch(e) { rej(e); }
+  });
+}
+function idbGet(storeName, key) {
+  if (!db) return Promise.resolve(null);
+  return new Promise(function(res, rej) {
+    try {
+      var req = db.transaction(storeName, 'readonly').objectStore(storeName).get(key);
+      req.onsuccess = function() { res(req.result || null); };
+      req.onerror   = function() { rej(req.error); };
+    } catch(e) { rej(e); }
+  });
+}
+function idbPut(storeName, value) {
   if (!db) return Promise.resolve();
   return new Promise(function(res, rej) {
     try {
-      var tx  = db.transaction(STORE, 'readwrite');
-      var req = tx.objectStore(STORE).delete(id);
-      req.onsuccess = function() { res(); };
-      req.onerror   = function() { rej(req.error); };
+      var tx = db.transaction(storeName, 'readwrite');
+      tx.objectStore(storeName).put(value);
+      tx.oncomplete = function() { res(); };
+      tx.onerror    = function() { rej(tx.error); };
+    } catch(e) { rej(e); }
+  });
+}
+function idbDelete(storeName, key) {
+  if (!db) return Promise.resolve();
+  return new Promise(function(res, rej) {
+    try {
+      var tx = db.transaction(storeName, 'readwrite');
+      tx.objectStore(storeName).delete(key);
+      tx.oncomplete = function() { res(); };
+      tx.onerror    = function() { rej(tx.error); };
     } catch(e) { rej(e); }
   });
 }
@@ -2456,6 +2541,16 @@ function auditFields(existing) {
     modificadoPor: quien,
     deviceId:      getDeviceId()
   };
+}
+
+// Marca de tiempo de una modificación: nunca anterior a la versión previa.
+// La nube resuelve conflictos por updatedAt (gana el más reciente); si otro
+// dispositivo con el reloj adelantado dejó una hora "futura", un cambio hecho
+// después igual tiene que quedar como más nuevo.
+function marcaTiempo(prevIso) {
+  var now = Date.now();
+  var prev = prevIso ? new Date(prevIso).getTime() : 0;
+  return new Date(isNaN(prev) ? now : Math.max(now, prev + 1)).toISOString();
 }
 
 function newRecordId() {
@@ -3248,7 +3343,7 @@ async function saveRegistroRecord() {
       observaciones: document.getElementById('rf-observaciones').value,
       registroPhotos: currentRegistroPhotos.map(function(p) { return { id: p.id, caption: p.caption }; }),
       ...auditFields(existingReg),
-      updatedAt: new Date().toISOString(),
+      updatedAt: marcaTiempo(existingReg && existingReg.updatedAt),
     };
 
     await dbPut(rec);
@@ -3610,6 +3705,8 @@ async function init() {
   updateHeaderInspector();
   checkDraft();
   setupPWA();
+  // Nube: si hay sesión, sincronizar al abrir
+  if (typeof nubeSesion === 'function' && nubeSesion()) { nubeActualizarIndicador(); nubeSync(); }
 }
 
 // ============================================================
@@ -4453,7 +4550,7 @@ async function saveWork() {
 
   r.trabajos = r.trabajos || [];
   r.trabajos.unshift(trabajo); // más reciente primero
-  r.updatedAt = new Date().toISOString();
+  r.updatedAt = marcaTiempo(r.updatedAt);
 
   await dbPut(r);
   closeWorkModal();
@@ -4468,7 +4565,7 @@ async function deleteWork(recordId, idx) {
   if (!r || !r.trabajos) return;
   showConfirm('¿Eliminar trabajo?', 'Se eliminará este registro de trabajo. No se puede deshacer.', async function() {
     r.trabajos.splice(idx, 1);
-    r.updatedAt = new Date().toISOString();
+    r.updatedAt = marcaTiempo(r.updatedAt);
     await dbPut(r);
     showToast('Trabajo eliminado');
     openDetail(recordId);
@@ -4908,7 +5005,7 @@ async function saveRecord() {
     // Árbol del inventario al que pertenece esta evaluación ('' = ficha independiente)
     arbolId: arbol ? arbol.id : '',
     ...auditFields(existing),
-    updatedAt: new Date().toISOString(),
+    updatedAt: marcaTiempo(existing && existing.updatedAt),
   };
 
   await dbPut(rec);
@@ -6568,12 +6665,12 @@ async function vincularSeleccionadas() {
   var chks = Array.from(document.querySelectorAll('.vinc-chk:checked'));
   if (!chks.length) { showToast('Marcá al menos un par para vincular', 'error'); return; }
   var byId = indexById();
-  var n = 0, now = new Date().toISOString(), quien = auditFields(null).modificadoPor;
+  var n = 0, quien = auditFields(null).modificadoPor;
   for (var i = 0; i < chks.length; i++) {
     var ev = byId[chks[i].dataset.ev], reg = byId[chks[i].dataset.reg];
     if (!ev || !reg || reg.tipo !== 'registro') continue;
     ev.arbolId = reg.id;
-    ev.updatedAt = now;
+    ev.updatedAt = marcaTiempo(ev.updatedAt);
     ev.modificadoPor = quien;
     await dbPut(ev);
     n++;
@@ -7535,6 +7632,616 @@ function closeMergeModal() {
 
 </script>
 
+<script>
+/* js/nube.js */
+// ============================================================
+// NUBE — sincronización con Supabase (offline-first)
+// ============================================================
+// La app sigue trabajando contra IndexedDB. Con sesión iniciada:
+//   * dbPut/dbDelete encolan cada cambio en el store OUTBOX (misma transacción).
+//   * nubeSync() sube la cola (RPC sync_push, last-write-wins por ficha) y baja
+//     lo que cambió en el servidor desde el último cursor (server_updated_at).
+//   * Las fotos se suben al bucket privado "fotos" (ruta = ID de la foto) y se
+//     descargan a demanda cuando una ficha bajada referencia una foto que no está.
+// Se usa la API REST de Supabase con fetch: sin SDK, sin dependencias.
+// Instancia = proyecto de Supabase (URL + clave publicable). Para otro municipio
+// se cambia NUBE_DEFAULT o se configura desde "Servidor" en el modal de Nube.
+
+var NUBE_DEFAULT = {
+  nombre: 'ArborRisk Demo',
+  url: 'https://ypkeecvfkcatdyoodhhd.supabase.co',
+  // Clave publicable: es pública por diseño. La seguridad la dan RLS y las funciones del servidor.
+  key: 'sb_publishable_OxoF-JPr0yOAsrWmHBR0Bw_XdPlXtll'
+};
+var NUBE_LS_CFG = 'arborrisk_nube_cfg', NUBE_LS_SES = 'arborrisk_nube_sesion';
+var NUBE_ROLES = { admin: 'Administrador', supervisor: 'Supervisor', relevador: 'Relevador', consulta: 'Solo consulta', pendiente: 'Pendiente de aprobación' };
+var NUBE_PUEDE_CARGAR = ['admin', 'supervisor', 'relevador'];
+
+var _nubeSes;                       // cache de la sesión (undefined = no leída)
+var _nubeSyncEnCurso = null, _nubeTimer = null;
+var _nubeFotosFallidas = {};        // IDs que no se pudieron bajar en esta sesión
+var nubeEstado = { estado: '', pendientes: 0, ultima: null, error: '', conflictos: 0, rechazadas: 0, fotosError: 0 };
+
+function nubeCfg() {
+  try {
+    var c = JSON.parse(localStorage.getItem(NUBE_LS_CFG) || 'null');
+    if (c && c.url && c.key) return c;
+  } catch (e) {}
+  return NUBE_DEFAULT;
+}
+
+function nubeSesion() {
+  if (_nubeSes === undefined) {
+    try { _nubeSes = JSON.parse(localStorage.getItem(NUBE_LS_SES) || 'null'); } catch (e) { _nubeSes = null; }
+  }
+  return _nubeSes;
+}
+
+function nubeGuardarSesion(s) {
+  _nubeSes = s;
+  try {
+    if (s) localStorage.setItem(NUBE_LS_SES, JSON.stringify(s));
+    else localStorage.removeItem(NUBE_LS_SES);
+  } catch (e) {}
+}
+
+function nubePerfil() { var s = nubeSesion(); return (s && s.perfil) || null; }
+
+// ── Errores legibles ──
+function nubeErrorMsg(j, status) {
+  var code = (j && (j.error_code || j.code || j.error)) || '';
+  var MAP = {
+    invalid_credentials: 'Email o contraseña incorrectos',
+    invalid_grant: 'Email o contraseña incorrectos',
+    email_not_confirmed: 'Tenés que confirmar tu email antes de ingresar (revisá tu correo)',
+    user_already_exists: 'Ya existe una cuenta con ese email',
+    weak_password: 'La contraseña es muy débil (mínimo 6 caracteres)',
+    over_email_send_rate_limit: 'Se enviaron demasiados emails. Probá en unos minutos',
+    signup_disabled: 'El registro de cuentas nuevas está deshabilitado en este servidor',
+    validation_failed: 'Revisá el email y la contraseña'
+  };
+  if (MAP[code]) return MAP[code];
+  return (j && (j.msg || j.message || j.error_description)) || ('Error del servidor (' + status + ')');
+}
+
+// ── Auth ──
+async function nubeAuth(path, body) {
+  var c = nubeCfg();
+  var res = await fetch(c.url + '/auth/v1/' + path, {
+    method: 'POST',
+    headers: { apikey: c.key, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  var j = await res.json().catch(function() { return {}; });
+  if (!res.ok) { var e = new Error(nubeErrorMsg(j, res.status)); e.status = res.status; throw e; }
+  return j;
+}
+
+function nubeSesionDesdeToken(t, prev) {
+  return {
+    url: nubeCfg().url,
+    access_token: t.access_token,
+    refresh_token: t.refresh_token,
+    expires_at: t.expires_at || Math.floor(Date.now() / 1000) + (t.expires_in || 3600),
+    user: { id: t.user.id, email: t.user.email },
+    perfil: prev ? prev.perfil : null
+  };
+}
+
+async function nubeToken() {
+  var s = nubeSesion();
+  if (!s) throw new Error('Sin sesión');
+  if (s.expires_at - 60 > Date.now() / 1000) return s.access_token;
+  try {
+    var t = await nubeAuth('token?grant_type=refresh_token', { refresh_token: s.refresh_token });
+    nubeGuardarSesion(nubeSesionDesdeToken(t, s));
+    return t.access_token;
+  } catch (e) {
+    if (e.status && e.status < 500) {        // refresh inválido: la sesión murió
+      nubeGuardarSesion(null);
+      nubeActualizarIndicador();
+      throw new Error('La sesión venció: volvé a ingresar');
+    }
+    throw e;                                  // sin red: se reintenta más tarde
+  }
+}
+
+async function nubeApi(path, opts) {
+  opts = opts || {};
+  var c = nubeCfg();
+  var headers = Object.assign({ apikey: c.key, Authorization: 'Bearer ' + (await nubeToken()) }, opts.headers || {});
+  var body = opts.body;
+  if (opts.json !== undefined) { headers['Content-Type'] = 'application/json'; body = JSON.stringify(opts.json); }
+  var res = await fetch(c.url + path, { method: opts.method || 'GET', headers: headers, body: body });
+  if (opts.raw) return res;
+  if (!res.ok) {
+    var j = await res.json().catch(function() { return {}; });
+    var e = new Error(j.message || j.msg || ('Error del servidor (' + res.status + ')'));
+    e.status = res.status; e.code = j.code;
+    throw e;
+  }
+  return res.status === 204 ? null : res.json().catch(function() { return null; });
+}
+
+async function nubeCargarPerfil() {
+  var s = nubeSesion();
+  if (!s) return null;
+  var rows = await nubeApi('/rest/v1/perfiles?select=user_id,email,nombre,iniciales,rol&user_id=eq.' + encodeURIComponent(s.user.id));
+  s = nubeSesion();
+  if (!s) return null;
+  s.perfil = (rows && rows[0]) || { rol: 'pendiente' };
+  nubeGuardarSesion(s);
+  return s.perfil;
+}
+
+async function nubeIngresar(email, password) {
+  var t = await nubeAuth('token?grant_type=password', { email: email, password: password });
+  nubeGuardarSesion(nubeSesionDesdeToken(t, null));
+  await nubeDespuesDeIngresar();
+}
+
+// Devuelve 'ok' (sesión iniciada) o 'confirmar' (el servidor pide confirmar el email)
+async function nubeRegistrar(email, password, nombre) {
+  var t = await nubeAuth('signup', { email: email, password: password, data: { nombre: nombre || '' } });
+  if (!t.access_token) return 'confirmar';
+  nubeGuardarSesion(nubeSesionDesdeToken(t, null));
+  await nubeDespuesDeIngresar();
+  return 'ok';
+}
+
+async function nubeDespuesDeIngresar() {
+  var perfil = await nubeCargarPerfil();
+  // Completar el perfil del servidor con la configuración local del inspector (y viceversa)
+  var cfg = getInspectorConfig();
+  if (perfil && !perfil.nombre && cfg.nombre) {
+    try { await nubeApi('/rest/v1/rpc/actualizar_mi_perfil', { method: 'POST', json: { p_nombre: cfg.nombre, p_iniciales: cfg.iniciales || '' } }); } catch (e) {}
+  } else if (perfil && perfil.nombre && !cfg.nombre) {
+    cfg.nombre = perfil.nombre;
+    if (perfil.iniciales && !cfg.iniciales) cfg.iniciales = perfil.iniciales;
+    try { localStorage.setItem('arborrisk_config', JSON.stringify(cfg)); } catch (e) {}
+    if (typeof updateHeaderInspector === 'function') updateHeaderInspector();
+  }
+  nubeActualizarIndicador();
+  await nubeOfrecerSubirLocales();
+  nubeSync();
+}
+
+async function nubeCerrarSesion() {
+  var s = nubeSesion();
+  if (s) {
+    try {
+      await fetch(nubeCfg().url + '/auth/v1/logout', { method: 'POST', headers: { apikey: nubeCfg().key, Authorization: 'Bearer ' + s.access_token } });
+    } catch (e) {}
+  }
+  nubeGuardarSesion(null);
+  nubeEstado = { estado: '', pendientes: 0, ultima: null, error: '', conflictos: 0, rechazadas: 0, fotosError: 0 };
+  nubeActualizarIndicador();
+}
+
+// Primer ingreso de este usuario en este dispositivo: ofrecer subir las fichas que ya había.
+// (Antes de iniciar sesión los cambios no se encolan.)
+async function nubeOfrecerSubirLocales() {
+  var s = nubeSesion();
+  if (!s || !records.length) return;
+  var flag = 'arborrisk_nube_subidas_' + nubeHash(s.url + '|' + s.user.id);
+  if (localStorage.getItem(flag)) return;
+  try { localStorage.setItem(flag, '1'); } catch (e) {}
+  if (!NUBE_PUEDE_CARGAR.includes((s.perfil || {}).rol)) return;
+  var n = records.length;
+  showConfirm('¿Subir tus fichas a la nube?',
+    'Este dispositivo tiene ' + n + ' ficha(s) cargadas antes de iniciar sesión. Si confirmás, se suben a "' + nubeCfg().nombre
+    + '" y las va a ver el equipo. Si no, quedan solo en este dispositivo (las que edites después sí se suben).',
+    async function() {
+      await nubeEncolarTodas();
+      showToast('☁ ' + n + ' ficha(s) en cola para subir', 'success');
+      nubeSync();
+    });
+}
+
+function nubeEncolarTodas() {
+  if (!db) return Promise.resolve();
+  return new Promise(function(res, rej) {
+    var tx = db.transaction(OUTBOX, 'readwrite'), st = tx.objectStore(OUTBOX), ts = Date.now();
+    records.forEach(function(r) { st.put({ id: r.id, deleted: false, tipo: r.tipo === 'registro' ? 'registro' : 'riesgo', ts: ts }); });
+    tx.oncomplete = function() { res(); };
+    tx.onerror = function() { rej(tx.error); };
+  });
+}
+
+function nubeHash(str) {
+  var h = 0;
+  for (var i = 0; i < str.length; i++) { h = ((h << 5) - h + str.charCodeAt(i)) | 0; }
+  return (h >>> 0).toString(36);
+}
+
+// ── Sincronización ──
+function nubeProgramarSync() {
+  clearTimeout(_nubeTimer);
+  _nubeTimer = setTimeout(function() { nubeSync(); }, 3000);
+  nubeActualizarIndicador();
+}
+
+function nubeSync() {
+  if (!nubeSesion()) { nubeActualizarIndicador(); return Promise.resolve(); }
+  if (!navigator.onLine) { nubeEstado.estado = 'offline'; nubeActualizarIndicador(); return Promise.resolve(); }
+  if (_nubeSyncEnCurso) return _nubeSyncEnCurso;
+  _nubeSyncEnCurso = (async function() {
+    nubeEstado.estado = 'sync'; nubeEstado.error = '';
+    nubeActualizarIndicador();
+    try {
+      var perfil = await nubeCargarPerfil();
+      var rol = perfil ? perfil.rol : 'pendiente';
+      if (NUBE_PUEDE_CARGAR.includes(rol)) await nubePush();
+      if (rol !== 'pendiente') await nubePull();
+      nubeEstado.estado = 'ok';
+      nubeEstado.ultima = new Date().toISOString();
+    } catch (e) {
+      console.warn('nubeSync:', e);
+      nubeEstado.estado = 'error';
+      nubeEstado.error = (e instanceof TypeError) ? 'Sin conexión con el servidor' : (e.message || String(e));
+    } finally {
+      _nubeSyncEnCurso = null;
+      await nubeActualizarIndicador();
+    }
+  })();
+  return _nubeSyncEnCurso;
+}
+
+function nubeFotoIdsDe(r) {
+  var ids = [];
+  (r.photos || []).forEach(function(p) { if (isPhotoId(p)) ids.push(p); });
+  (r.evaluaciones || []).forEach(function(ev) { (ev.photos || []).forEach(function(p) { if (isPhotoId(p)) ids.push(p); }); });
+  (r.registroPhotos || []).forEach(function(p) { if (p && isPhotoId(p.id)) ids.push(p.id); });
+  return ids.filter(function(id) { return /^photo_[A-Za-z0-9_]{1,60}$/.test(id); });
+}
+
+async function nubeSubirFotosDe(r) {
+  var c = nubeCfg();
+  var ids = nubeFotoIdsDe(r);
+  for (var i = 0; i < ids.length; i++) {
+    var id = ids[i];
+    if (await idbGet(NUBE_FOTOS, id)) continue;
+    var blob = await dbGetPhoto(id);
+    if (!blob) continue;
+    var res = await fetch(c.url + '/storage/v1/object/fotos/' + id, {      // un error de red corta la sync (se reintenta)
+      method: 'POST',
+      headers: { apikey: c.key, Authorization: 'Bearer ' + (await nubeToken()), 'Content-Type': blob.type || 'image/webp', 'x-upsert': 'false' },
+      body: blob
+    });
+    var yaExiste = false;
+    if (!res.ok) {
+      var j = await res.json().catch(function() { return {}; });
+      yaExiste = res.status === 409 || String(j.statusCode) === '409' || /duplicate|exists/i.test(j.error || j.message || '');
+      if (!yaExiste) { nubeEstado.fotosError++; continue; }   // p.ej. formato no admitido: no bloquea la ficha
+    }
+    await idbPut(NUBE_FOTOS, { id: id });
+  }
+}
+
+async function nubeQuitarDeOutbox(id, ts) {
+  var cur = await idbGet(OUTBOX, id);
+  if (cur && cur.ts === ts) await idbDelete(OUTBOX, id);   // si cambió mientras subía, queda para la próxima
+}
+
+async function nubePush() {
+  var pend = await idbAll(OUTBOX);
+  if (!pend.length) return;
+  var byId = indexById();
+  nubeEstado.conflictos = 0; nubeEstado.rechazadas = 0; nubeEstado.fotosError = 0;
+  var huboCambios = false;
+  for (var i = 0; i < pend.length; i += 50) {
+    var lote = pend.slice(i, i + 50), payload = [], enviados = {};
+    for (var k = 0; k < lote.length; k++) {
+      var e = lote[k];
+      if (!isSafeId(e.id)) { await idbDelete(OUTBOX, e.id); continue; }
+      if (e.deleted) {
+        payload.push({ id: e.id, tipo: e.tipo || 'riesgo', updated_at: e.updated_at || new Date().toISOString(), deleted: true });
+        enviados[e.id] = e;
+        continue;
+      }
+      var r = byId[e.id];
+      if (!r) { await idbDelete(OUTBOX, e.id); continue; }
+      await nubeSubirFotosDe(r);
+      if (JSON.stringify(r).length > 290000) { nubeEstado.rechazadas++; continue; }   // demasiado grande (fotos viejas sin migrar)
+      payload.push({ id: r.id, tipo: r.tipo === 'registro' ? 'registro' : 'riesgo', data: r,
+        updated_at: r.updatedAt || '1970-01-01T00:00:00Z', deleted: false });
+      enviados[r.id] = e;
+    }
+    if (!payload.length) continue;
+    var out = await nubeApi('/rest/v1/rpc/sync_push', { method: 'POST', json: { p_fichas: payload } });
+    for (var a = 0; a < (out.accepted || []).length; a++) {
+      var aid = out.accepted[a];
+      if (enviados[aid]) await nubeQuitarDeOutbox(aid, enviados[aid].ts);
+    }
+    for (var c2 = 0; c2 < (out.conflicts || []).length; c2++) {
+      // El servidor tenía una versión más nueva: se descarta la local
+      await idbDelete(OUTBOX, out.conflicts[c2].id);
+      if (await nubeAplicarRemota(out.conflicts[c2], byId, true)) huboCambios = true;
+      nubeEstado.conflictos++;
+    }
+    for (var x = 0; x < (out.rejected || []).length; x++) {
+      var rj = out.rejected[x];
+      if (rj.id) await idbDelete(OUTBOX, rj.id);
+      if (rj.server && await nubeAplicarRemota(rj.server, byId, true)) huboCambios = true;   // p.ej. borrado sin permiso: se restaura
+      nubeEstado.rechazadas++;
+    }
+  }
+  if (huboCambios) nubeRefrescarUI();
+}
+
+// Aplica una fila del servidor a la base local. Devuelve true si cambió algo.
+async function nubeAplicarRemota(row, byId, forzar) {
+  if (!row || !isSafeId(row.id)) return false;
+  var local = byId[row.id];
+  if (!forzar) {
+    var pend = await idbGet(OUTBOX, row.id);
+    if (pend) {
+      // Hay un cambio local sin subir: gana el más reciente
+      var tLocal = pend.deleted ? pend.updated_at : (local && local.updatedAt);
+      if (tLocal && new Date(tLocal) >= new Date(row.updated_at)) return false;
+      await idbDelete(OUTBOX, row.id);
+    }
+  }
+  if (row.deleted_at) {
+    if (!local) return false;
+    await dbDelete(row.id, { noSync: true });
+    delete byId[row.id];
+    records = records.filter(function(r) { return r.id !== row.id; });
+    return true;
+  }
+  var rec = row.data;
+  if (!rec || typeof rec !== 'object') return false;
+  rec.id = row.id;
+  if (!forzar && local && local.updatedAt === rec.updatedAt) return false;   // ya la tenemos
+  await dbPut(rec, { noSync: true });
+  byId[rec.id] = rec;
+  var idx = records.findIndex(function(r) { return r.id === rec.id; });
+  if (idx >= 0) records[idx] = rec; else records.push(rec);
+  return true;
+}
+
+function nubeCursorKey() {
+  var s = nubeSesion();
+  return 'arborrisk_nube_cursor_' + nubeHash(s.url + '|' + s.user.id);
+}
+
+async function nubePull() {
+  var key = nubeCursorKey();
+  var cur = null;
+  try { cur = JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) {}
+  // Se relee un minuto hacia atrás: una transacción que confirmó tarde puede tener
+  // un server_updated_at anterior al último visto. Aplicar dos veces es inocuo.
+  var desde = cur ? new Date(new Date(cur.t).getTime() - 60000).toISOString() : null;
+  var lastId = null, cambios = 0, byId = indexById(), PAGE = 500;
+  while (true) {
+    var q = '/rest/v1/fichas?select=id,tipo,data,updated_at,deleted_at,server_updated_at&order=server_updated_at.asc,id.asc&limit=' + PAGE;
+    if (desde && lastId) {
+      q += '&or=' + encodeURIComponent('(server_updated_at.gt."' + desde + '",and(server_updated_at.eq."' + desde + '",id.gt."' + lastId + '"))');
+    } else if (desde) {
+      q += '&server_updated_at=gte.' + encodeURIComponent(desde);
+    }
+    var rows = await nubeApi(q);
+    for (var i = 0; i < rows.length; i++) {
+      if (await nubeAplicarRemota(rows[i], byId, false)) cambios++;
+    }
+    if (rows.length) {
+      var last = rows[rows.length - 1];
+      desde = last.server_updated_at; lastId = last.id;
+      try { localStorage.setItem(key, JSON.stringify({ t: desde, id: lastId })); } catch (e) {}
+    }
+    if (rows.length < PAGE) break;
+  }
+  if (cambios) nubeRefrescarUI();
+  return cambios;
+}
+
+function nubeRefrescarUI() {
+  applyFilters();
+  updateStorage();
+  if (typeof currentTab !== 'undefined') {
+    if (currentTab === 'proyectos') renderProjects();
+    if (currentTab === 'mapa') renderMap();
+    if (currentTab === 'catastro') renderCatastro();
+  }
+}
+
+// Descarga a demanda una foto que está en la nube pero no en este dispositivo (la usa resolvePhotoUrl).
+async function nubeBajarFoto(id) {
+  if (!nubeSesion() || !navigator.onLine || _nubeFotosFallidas[id] || !/^photo_[A-Za-z0-9_]{1,60}$/.test(id)) return null;
+  try {
+    var res = await nubeApi('/storage/v1/object/authenticated/fotos/' + id, { raw: true });
+    if (!res.ok) { _nubeFotosFallidas[id] = true; return null; }
+    var blob = await res.blob();
+    await dbPutPhoto(id, blob);
+    await idbPut(NUBE_FOTOS, { id: id });
+    return blob;
+  } catch (e) { return null; }
+}
+
+function idbCount(storeName) {
+  if (!db) return Promise.resolve(0);
+  return new Promise(function(res) {
+    try {
+      var req = db.transaction(storeName, 'readonly').objectStore(storeName).count();
+      req.onsuccess = function() { res(req.result || 0); };
+      req.onerror = function() { res(0); };
+    } catch (e) { res(0); }
+  });
+}
+
+// ── UI: indicador en el header ──
+async function nubeActualizarIndicador() {
+  var dot = document.getElementById('nube-dot');
+  var s = nubeSesion();
+  nubeEstado.pendientes = s ? await idbCount(OUTBOX) : 0;
+  if (dot) {
+    var cls = !s ? 'off' : nubeEstado.estado === 'error' ? 'err'
+      : (nubeEstado.estado === 'sync' || nubeEstado.pendientes) ? 'pend' : nubeEstado.estado === 'offline' ? 'pend' : 'ok';
+    dot.className = 'nube-dot ' + cls;
+    dot.title = !s ? 'Nube: sin sesión' : nubeEstado.estado === 'error' ? 'Nube: ' + nubeEstado.error
+      : nubeEstado.pendientes ? 'Nube: ' + nubeEstado.pendientes + ' cambio(s) sin subir' : 'Nube: sincronizado';
+  }
+  var modal = document.getElementById('nube-modal');
+  if (modal && modal.classList.contains('open')) renderNubeEstado();
+}
+
+// ── UI: modal ──
+function openNubeModal() {
+  closeSyncMenu();
+  renderNubeModal();
+  document.getElementById('nube-modal').classList.add('open');
+  if (nubeSesion()) nubeSync();
+}
+
+function closeNubeModal() {
+  document.getElementById('nube-modal').classList.remove('open');
+}
+
+function renderNubeModal() {
+  var body = document.getElementById('nube-body');
+  var s = nubeSesion(), c = nubeCfg();
+  var head = '<div style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-bottom:12px">Servidor: <b>' + esc(c.nombre || c.url) + '</b></div>';
+  if (!s) {
+    body.innerHTML = head
+      + '<p style="font-size:12px;color:var(--text2);margin-bottom:12px">Iniciá sesión para compartir las fichas con tu equipo. Sin señal la app sigue funcionando: los cambios se suben solos cuando vuelve la conexión.</p>'
+      + '<label class="field-label">Email</label><input class="field-input" id="nube-email" type="email" autocomplete="username" style="margin:4px 0 10px">'
+      + '<label class="field-label">Contraseña</label><input class="field-input" id="nube-pass" type="password" autocomplete="current-password" style="margin:4px 0 10px">'
+      + '<label class="field-label">Nombre (solo para crear cuenta)</label><input class="field-input" id="nube-nombre" type="text" style="margin:4px 0 14px">'
+      + '<div class="confirm-actions"><button type="button" class="btn-cancel" onclick="nubeAccionRegistrar()">Crear cuenta</button>'
+      + '<button type="button" class="btn-confirm-ok" style="background:var(--accent)" onclick="nubeAccionIngresar()">Ingresar</button></div>'
+      + '<div id="nube-msg" style="font-size:12px;margin-top:10px"></div>'
+      + '<details style="margin-top:14px"><summary style="font-family:var(--mono);font-size:10px;color:var(--text3);cursor:pointer">Cambiar servidor (otra instancia)</summary>'
+      + '<label class="field-label" style="margin-top:8px">Nombre</label><input class="field-input" id="nube-srv-nombre" value="' + esc(c.nombre || '') + '" style="margin:4px 0 8px">'
+      + '<label class="field-label">URL del proyecto</label><input class="field-input" id="nube-srv-url" value="' + esc(c.url) + '" style="margin:4px 0 8px;font-family:var(--mono);font-size:11px">'
+      + '<label class="field-label">Clave publicable</label><input class="field-input" id="nube-srv-key" value="' + esc(c.key) + '" style="margin:4px 0 8px;font-family:var(--mono);font-size:11px">'
+      + '<div class="confirm-actions"><button type="button" class="btn-cancel" onclick="nubeServidorDefault()">Usar el predeterminado</button>'
+      + '<button type="button" class="btn-confirm-ok" style="background:var(--accent)" onclick="nubeGuardarServidor()">Guardar servidor</button></div></details>';
+    return;
+  }
+  var p = s.perfil || {};
+  body.innerHTML = head
+    + '<div style="font-size:13px;font-weight:700">' + esc(s.user.email) + '</div>'
+    + '<div style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-bottom:10px">' + esc(p.nombre || '') + ' · ' + esc(NUBE_ROLES[p.rol] || p.rol || '—') + '</div>'
+    + (p.rol === 'pendiente' ? '<div class="nube-aviso">Tu cuenta espera que un administrador le asigne un rol. Hasta entonces no se sincroniza nada.</div>' : '')
+    + (p.rol === 'consulta' ? '<div class="nube-aviso">Tu rol es de solo consulta: ves las fichas del equipo, pero lo que cargues queda solo en este dispositivo.</div>' : '')
+    + '<div id="nube-estado"></div>'
+    + '<div class="confirm-actions" style="margin-top:12px"><button type="button" class="btn-cancel" onclick="nubeAccionSalir()">Cerrar sesión</button>'
+    + '<button type="button" class="btn-confirm-ok" style="background:var(--accent)" onclick="nubeSync()">⟳ Sincronizar</button></div>'
+    + (p.rol === 'admin' ? '<div style="margin-top:16px"><div class="field-label" style="margin-bottom:6px">Usuarios del equipo</div><div id="nube-usuarios" style="font-size:12px;color:var(--text3)">Cargando…</div></div>' : '');
+  renderNubeEstado();
+  if (p.rol === 'admin') nubeCargarUsuarios();
+}
+
+function renderNubeEstado() {
+  var el = document.getElementById('nube-estado');
+  if (!el) return;
+  var e = nubeEstado;
+  var txt = e.estado === 'sync' ? '⟳ Sincronizando…'
+    : e.estado === 'error' ? '⚠ ' + e.error
+    : e.estado === 'offline' ? 'Sin conexión: los cambios quedan en cola'
+    : e.ultima ? '✓ Sincronizado ' + new Date(e.ultima).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : '';
+  el.innerHTML = '<div style="font-family:var(--mono);font-size:11px;color:' + (e.estado === 'error' ? 'var(--high)' : 'var(--text2)') + '">' + esc(txt) + '</div>'
+    + '<div style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:4px">'
+    + esc(e.pendientes + ' cambio(s) sin subir')
+    + (e.conflictos ? esc(' · ' + e.conflictos + ' conflicto(s): quedó la versión más nueva del servidor') : '')
+    + (e.rechazadas ? esc(' · ' + e.rechazadas + ' rechazada(s) por permisos o tamaño') : '')
+    + (e.fotosError ? esc(' · ' + e.fotosError + ' foto(s) no se pudieron subir') : '')
+    + '</div>';
+}
+
+async function nubeAccionIngresar() {
+  var msg = document.getElementById('nube-msg');
+  var email = document.getElementById('nube-email').value.trim(), pass = document.getElementById('nube-pass').value;
+  if (!email || !pass) { msg.textContent = 'Completá email y contraseña'; return; }
+  msg.textContent = 'Ingresando…';
+  try {
+    await nubeIngresar(email, pass);
+    renderNubeModal();
+    showToast('☁ Sesión iniciada', 'success');
+  } catch (e) {
+    msg.textContent = (e instanceof TypeError) ? 'No hay conexión con el servidor' : e.message;
+  }
+}
+
+async function nubeAccionRegistrar() {
+  var msg = document.getElementById('nube-msg');
+  var email = document.getElementById('nube-email').value.trim(), pass = document.getElementById('nube-pass').value;
+  var nombre = document.getElementById('nube-nombre').value.trim();
+  if (!email || pass.length < 6) { msg.textContent = 'Ingresá un email y una contraseña de al menos 6 caracteres'; return; }
+  msg.textContent = 'Creando cuenta…';
+  try {
+    var r = await nubeRegistrar(email, pass, nombre);
+    if (r === 'confirmar') { msg.textContent = 'Cuenta creada. Confirmá tu email con el enlace que te llegó y después ingresá.'; return; }
+    renderNubeModal();
+    showToast('☁ Cuenta creada', 'success');
+  } catch (e) {
+    msg.textContent = (e instanceof TypeError) ? 'No hay conexión con el servidor' : e.message;
+  }
+}
+
+function nubeAccionSalir() {
+  idbCount(OUTBOX).then(function(n) {
+    var aviso = n ? ' Hay ' + n + ' cambio(s) sin subir: se van a subir cuando vuelvas a ingresar.' : '';
+    showConfirm('¿Cerrar sesión?', 'Las fichas quedan en este dispositivo.' + aviso, async function() {
+      await nubeCerrarSesion();
+      renderNubeModal();
+    });
+  });
+}
+
+function nubeGuardarServidor() {
+  var url = document.getElementById('nube-srv-url').value.trim().replace(/\/+$/, '');
+  var key = document.getElementById('nube-srv-key').value.trim();
+  var nombre = document.getElementById('nube-srv-nombre').value.trim();
+  if (!/^https:\/\/[a-z0-9.-]+$/i.test(url) || !key) { showToast('URL o clave inválidas', 'error'); return; }
+  try { localStorage.setItem(NUBE_LS_CFG, JSON.stringify({ url: url, key: key, nombre: nombre || url })); } catch (e) {}
+  renderNubeModal();
+  showToast('Servidor guardado', 'success');
+}
+
+function nubeServidorDefault() {
+  try { localStorage.removeItem(NUBE_LS_CFG); } catch (e) {}
+  renderNubeModal();
+}
+
+async function nubeCargarUsuarios() {
+  var el = document.getElementById('nube-usuarios');
+  if (!el) return;
+  try {
+    var rows = await nubeApi('/rest/v1/perfiles?select=user_id,email,nombre,rol&order=creado_en.asc');
+    var me = nubeSesion().user.id;
+    el.innerHTML = rows.map(function(u) {
+      var opts = Object.keys(NUBE_ROLES).map(function(k) {
+        return '<option value="' + k + '"' + (u.rol === k ? ' selected' : '') + '>' + esc(NUBE_ROLES[k]) + '</option>';
+      }).join('');
+      return '<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-top:1px solid var(--border)">'
+        + '<div style="flex:1;min-width:0"><div style="font-weight:700;color:var(--text);overflow:hidden;text-overflow:ellipsis">' + esc(u.nombre || u.email) + '</div>'
+        + '<div style="font-family:var(--mono);font-size:10px;overflow:hidden;text-overflow:ellipsis">' + esc(u.email || '') + '</div></div>'
+        + '<select class="field-select" style="width:auto;font-size:11px" ' + (u.user_id === me ? 'disabled ' : '')
+        + 'data-uid="' + esc(u.user_id) + '" onchange="nubeAsignarRol(this.dataset.uid, this.value)">' + opts + '</select></div>';
+    }).join('') || 'Sin usuarios';
+  } catch (e) {
+    el.textContent = 'No se pudo cargar la lista: ' + e.message;
+  }
+}
+
+async function nubeAsignarRol(uid, rol) {
+  try {
+    await nubeApi('/rest/v1/rpc/asignar_rol', { method: 'POST', json: { p_user_id: uid, p_rol: rol } });
+    showToast('Rol actualizado', 'success');
+  } catch (e) {
+    showToast(e.message, 'error');
+    nubeCargarUsuarios();
+  }
+}
+
+// ── Disparadores automáticos ──
+window.addEventListener('online', function() { nubeSync(); });
+window.addEventListener('offline', function() { nubeEstado.estado = 'offline'; nubeActualizarIndicador(); });
+document.addEventListener('visibilitychange', function() { if (document.visibilityState === 'visible') nubeSync(); });
+setInterval(function() { if (document.visibilityState === 'visible') nubeSync(); }, 120000);
+
+</script>
 <script>
 /* js/qr.js */
 // ============================================================
