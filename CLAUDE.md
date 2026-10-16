@@ -18,7 +18,7 @@
 
 ## Estructura de archivos
 - `index.html` — **toda la app** (markup + `<style>` + `<script>`).
-- `sw.js` — Service Worker (offline + actualizaciones). **`CACHE_VERSION` actual: `arborrisk-v5`**.
+- `sw.js` — Service Worker (offline + actualizaciones). **`CACHE_VERSION` actual: `arborrisk-v6`**.
 - `manifest.webmanifest` — manifest PWA (instalación).
 - `icon.svg` — icono vectorial (usado por el manifest y como `apple-touch-icon`/`favicon`).
 - `CLAUDE.md` — esta guía.
@@ -46,17 +46,22 @@ grep -nE "css/[a-z]+\.css|js/[a-z]+\.js" index.html
 | `js/core.js` | Inicialización (`DOMContentLoaded`), `setupPWA()` (registra `./sw.js`), prompt de instalación |
 | `js/map.js` | Mapa Leaflet, clustering de marcadores, picker de GPS, **descarga de zona offline** (`downloadMapArea`/`runTileDownload`/`lngLatToTile`) |
 | `js/projects.js` | Agrupación de fichas por cliente/proyecto |
-| `js/config.js` | Configuración (tema, datos del profesional, etc.) |
+| `js/config.js` | Configuración (tema, datos del profesional, etc.), export de campo, **GeoJSON**, **CSV** (`exportCSV`, `;` + coma decimal para Excel AR) y **consolidación** (`mergeImportData`) |
 | `js/qr.js` | Generación de etiquetas con **QR** por ficha |
 
 ## Convenciones importantes
 - **Fotos en IndexedDB, no en localStorage:** una foto se referencia por un ID; el blob vive en el store `photos`. Resolvé con `dbGetPhoto(id)`. Para el backup, `resolveForExport()` convierte los IDs a base64.
 - **localStorage solo para preferencias/borrador:** claves con prefijo `arborrisk_` (ej. `arborrisk_sort`, `pwa_dismissed`). No meter datos grandes ahí.
-- **XSS:** escapar SIEMPRE los datos del usuario antes de meterlos en `innerHTML` (varios render usan `.replace(/"/g,'&quot;')` y similares — mantener el patrón).
+- **XSS:** escapar SIEMPRE los datos del usuario con **`esc()`** (en `js/state.js`) antes de meterlos en `innerHTML` o en atributos. Es crítico porque "Consolidar" importa fichas de otros dispositivos. No escapar en `textContent` ni en `doc.text` (PDF).
+- **IDs de ficha:** se generan con `newRecordId()` (UUID). Se insertan en handlers `onclick`, así que al importar/consolidar se descartan los que no pasan `isSafeId()`.
+- **Campos nuevos en una ficha:** `saveRecord()` y `saveRegistroRecord()` **reconstruyen el objeto campo por campo**; un campo que no esté listado ahí se pierde al editar.
+- **GPS:** usar `setGpsMeta(fieldId, valor, fuente, precision)` para cargar coordenadas y `readGpsMeta(fieldId)` al guardar. Guardan `gpsFuente` (`gps`/`mapa`/`manual`) y `gpsPrecision` (m). Editar las coordenadas a mano las marca como `manual`.
+- **Autoría:** `auditFields(existing)` agrega `creadoPor`, `creadoEn`, `modificadoPor`, `deviceId`. `recordInspector(r)` resuelve el inspector de una ficha (para exportaciones).
+- **Lista paginada:** `renderList()` muestra `LIST_PAGE_SIZE` tarjetas y un botón "Mostrar más"; no volver a insertar todas.
 - **Niveles de riesgo:** bajo / moderado / alto, con colores en variables CSS (`--low`, `--mod`, `--high`).
 
 ## PWA / Service Worker (detalles que no romper)
-- El SW es un archivo real: **`sw.js`**. `CACHE_VERSION` actual: **`arborrisk-v5`** (constante arriba de `sw.js`). Estrategia: **network-first** en navegaciones (con timeout y fallback a caché) + **cache-first** en el resto del mismo origen. Mismo patrón que el `sw.js` de presupuestos.
+- El SW es un archivo real: **`sw.js`**. `CACHE_VERSION` actual: **`arborrisk-v6`** (constante arriba de `sw.js`). Estrategia: **network-first** en navegaciones (con timeout y fallback a caché) + **cache-first** en el resto del mismo origen. Mismo patrón que el `sw.js` de presupuestos.
 - `APP_SHELL` (en `sw.js`) precachea `./`, `./index.html`, `./manifest.webmanifest`, `./icon.svg`. **Si agregás un archivo local nuevo, sumalo a `APP_SHELL`** o se rompe el offline.
 - **Cacheo de CDN (offline total):** el SW cachea cross-origin con **cache-first**:
   - `CDN_HOSTS` (`cdnjs.cloudflare.com`, `fonts.googleapis.com`, `fonts.gstatic.com`) → cache `…-cdn`. Cubre jsPDF, Leaflet, markercluster, QR y las fuentes. Se cachean **en la primera carga online**; después funcionan offline.
@@ -88,7 +93,12 @@ PY
 ```bash
 node test/pwa.test.cjs
 ```
-Parsea el `CACHE_VERSION` de `sw.js`, así que no hay que tocarlo al subir la versión. _(La network policy del entorno puede bloquear cdnjs/OSM; por eso el test no depende de recursos externos.)_
+Parsea el `CACHE_VERSION` de `sw.js`, así que no hay que tocarlo al subir la versión.
+
+Test de comportamiento del catastro (XSS al consolidar, IDs inválidos, paginación, UUID, GPS/autoría, CSV y GeoJSON):
+```bash
+node test/catastro.test.cjs
+``` _(La network policy del entorno puede bloquear cdnjs/OSM; por eso el test no depende de recursos externos.)_
 
 ## Cosas que NO romper
 - No pasar el JS a módulos ES (rompería los `onclick` globales).
