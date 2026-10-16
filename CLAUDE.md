@@ -18,7 +18,7 @@
 
 ## Estructura de archivos
 - `index.html` — **toda la app** (markup + `<style>` + `<script>`).
-- `sw.js` — Service Worker (offline + actualizaciones). **`CACHE_VERSION` actual: `arborrisk-v6`**.
+- `sw.js` — Service Worker (offline + actualizaciones). **`CACHE_VERSION` actual: `arborrisk-v7`**.
 - `manifest.webmanifest` — manifest PWA (instalación).
 - `icon.svg` — icono vectorial (usado por el manifest y como `apple-touch-icon`/`favicon`).
 - `CLAUDE.md` — esta guía.
@@ -57,11 +57,17 @@ grep -nE "css/[a-z]+\.css|js/[a-z]+\.js" index.html
 - **Campos nuevos en una ficha:** `saveRecord()` y `saveRegistroRecord()` **reconstruyen el objeto campo por campo**; un campo que no esté listado ahí se pierde al editar.
 - **GPS:** usar `setGpsMeta(fieldId, valor, fuente, precision)` para cargar coordenadas y `readGpsMeta(fieldId)` al guardar. Guardan `gpsFuente` (`gps`/`mapa`/`manual`) y `gpsPrecision` (m). Editar las coordenadas a mano las marca como `manual`.
 - **Autoría:** `auditFields(existing)` agrega `creadoPor`, `creadoEn`, `modificadoPor`, `deviceId`. `recordInspector(r)` resuelve el inspector de una ficha (para exportaciones).
+- **Modelo árbol + evaluaciones:** la ficha de **registro** (`tipo:'registro'`) es el árbol/sitio inventariado; una ficha de **riesgo** se vincula a él con **`arbolId`** (campo "Árbol del inventario" o botón "＋ Evaluación de riesgo" del detalle → `openEvalFromArbol`). Helpers: `arbolDeEvaluacion`, `evaluacionesDeArbol`, `ultimaEvaluacion`, `registroPorCodigo`. Una ficha de riesgo con `arbolId` inexistente se trata como independiente.
+- **Estadísticas del catastro:** usar **`calcCatastroStats()`** (panel y PDF). Cuenta por árbol (registro + riesgo no vinculadas), separa sitios sin árbol (`esSitioSinArbol`: tocón, cazuela vacía, apto para plantar) y toma el riesgo de la última evaluación. No volver a contar `records.length` como árboles.
+- **Catálogo de especies** (`/* js/catalogo.js */`, `ESPECIES_CATALOGO`): `normalizarEspecie()` se aplica al guardar; `buscarEspecie()` da nombre común, origen e invasora. No agregar sinónimos de género ("olmo", "roble"): asignarían una especie no verificada.
+- **Campos de sitio del registro:** `condicionSitio`, `calle`, `numero`, `emplazamiento`, `conflictos` (labels en `CONDICION_LABEL`/`EMPLAZAMIENTO_LABEL`).
+- **Migración de vínculos:** el panel Catastro sugiere pares evaluación↔registro a < `VINCULO_MAX_M` m y misma especie (`candidatosVinculo`, grilla espacial); el usuario confirma. Nunca vincular automáticamente.
+- **Exportaciones con muchas fichas:** usar `indexById()` en vez de `records.find` por fila.
 - **Lista paginada:** `renderList()` muestra `LIST_PAGE_SIZE` tarjetas y un botón "Mostrar más"; no volver a insertar todas.
 - **Niveles de riesgo:** bajo / moderado / alto, con colores en variables CSS (`--low`, `--mod`, `--high`).
 
 ## PWA / Service Worker (detalles que no romper)
-- El SW es un archivo real: **`sw.js`**. `CACHE_VERSION` actual: **`arborrisk-v6`** (constante arriba de `sw.js`). Estrategia: **network-first** en navegaciones (con timeout y fallback a caché) + **cache-first** en el resto del mismo origen. Mismo patrón que el `sw.js` de presupuestos.
+- El SW es un archivo real: **`sw.js`**. `CACHE_VERSION` actual: **`arborrisk-v7`** (constante arriba de `sw.js`). Estrategia: **network-first** en navegaciones (con timeout y fallback a caché) + **cache-first** en el resto del mismo origen. Mismo patrón que el `sw.js` de presupuestos.
 - `APP_SHELL` (en `sw.js`) precachea `./`, `./index.html`, `./manifest.webmanifest`, `./icon.svg`. **Si agregás un archivo local nuevo, sumalo a `APP_SHELL`** o se rompe el offline.
 - **Cacheo de CDN (offline total):** el SW cachea cross-origin con **cache-first**:
   - `CDN_HOSTS` (`cdnjs.cloudflare.com`, `fonts.googleapis.com`, `fonts.gstatic.com`) → cache `…-cdn`. Cubre jsPDF, Leaflet, markercluster, QR y las fuentes. Se cachean **en la primera carga online**; después funcionan offline.
@@ -95,7 +101,7 @@ node test/pwa.test.cjs
 ```
 Parsea el `CACHE_VERSION` de `sw.js`, así que no hay que tocarlo al subir la versión.
 
-Test de comportamiento del catastro (XSS al consolidar, IDs inválidos, paginación, UUID, GPS/autoría, CSV y GeoJSON):
+Test de comportamiento del catastro (XSS al consolidar, IDs inválidos, paginación, UUID, GPS/autoría, CSV/GeoJSON, catálogo de especies, vínculo árbol↔evaluación, conteo por árbol, migración y fotos consolidadas):
 ```bash
 node test/catastro.test.cjs
 ``` _(La network policy del entorno puede bloquear cdnjs/OSM; por eso el test no depende de recursos externos.)_

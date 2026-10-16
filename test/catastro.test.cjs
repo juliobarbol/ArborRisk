@@ -174,6 +174,127 @@ const check = (name, ok, extra) => {
       && evilFeat && evilFeat.properties.inspector !== 'Exportador', regFeat && regFeat.properties.inspector);
     check('GeoJSON: incluye precisión y fuente GPS', gj.features.some(f => f.properties.gps_fuente === 'manual'));
 
+    // ── 6. Catálogo de especies ──
+    const cat = await page.evaluate(() => ({
+      jac: normalizarEspecie('jacarandá'),
+      autor: normalizarEspecie('Quercus robur L.'),
+      hibrido: normalizarEspecie('Tilia x moltkei'),
+      cultivar: normalizarEspecie("Prunus cerasifera 'Atropurpurea'"),
+      generico: normalizarEspecie('olmo'),
+      desconocida: normalizarEspecie('Especie rara'),
+      inv: especieInfoLabel('ligustro'),
+    }));
+    check('Catálogo: nombre común → científico', cat.jac === 'Jacaranda mimosifolia', cat.jac);
+    check('Catálogo: ignora autor, cultivar y marca de híbrido',
+      cat.autor === 'Quercus robur' && cat.cultivar === 'Prunus cerasifera' && cat.hibrido === 'Tilia × moltkei');
+    check('Catálogo: no asigna especie a un nombre de género ("olmo")', cat.generico === 'olmo');
+    check('Catálogo: especie desconocida queda como se escribió', cat.desconocida === 'Especie rara');
+    check('Catálogo: marca invasoras', /invasora/.test(cat.inv), cat.inv);
+
+    // ── 7. Ficha de registro con campos de sitio + evaluación vinculada ──
+    const base = await page.evaluate(() => { const s = calcCatastroStats(); return { total: s.total, vacios: s.sitiosVacios.length }; });
+    const reg = await page.evaluate(async () => {
+      openFormRegistro();
+      document.getElementById('rf-especie').value = 'tipa';
+      document.getElementById('rf-calle').value = 'Av. Colón';
+      document.getElementById('rf-numero').value = '1250';
+      document.getElementById('rf-emplazamiento').value = 'vereda';
+      document.querySelector('#rf-conflictos .relev-chip[data-val="Luminaria"]').click();
+      setGpsMeta('rf-gps-display', '-31.400000, -64.200000', 'gps', 4);
+      await saveRegistroRecord();
+      const r = records.filter(x => x.tipo === 'registro' && x.calle === 'Av. Colón')[0];
+      return r && { id: r.id, code: r.code, especie: r.especie, condicion: r.condicionSitio, numero: r.numero,
+        emplazamiento: r.emplazamiento, conflictos: r.conflictos };
+    });
+    check('Registro guarda especie normalizada y campos de sitio', !!reg && reg.especie === 'Tipuana tipu'
+      && reg.condicion === 'arbol' && reg.numero === '1250' && reg.emplazamiento === 'vereda'
+      && reg.conflictos.join() === 'Luminaria', JSON.stringify(reg));
+
+    const linked = await page.evaluate(async (regId) => {
+      openEvalFromArbol(regId);
+      const pre = { especie: document.getElementById('f-especie').value, arbol: document.getElementById('f-arbol').value,
+        gps: document.getElementById('gps-display').value };
+      await saveRecord();
+      const ev = records.find(x => x.tipo !== 'registro' && x.arbolId === regId);
+      await openDetailRegistro(records.find(x => x.id === regId));
+      const detail = document.getElementById('detail-body').textContent;
+      return { pre, evId: ev && ev.id, evCode: ev && ev.code, detailHasEval: !!ev && detail.includes(ev.code) };
+    }, reg && reg.id);
+    check('Evaluación desde el árbol viene prellenada', linked.pre.especie === 'Tipuana tipu' && linked.pre.arbol === (reg && reg.code)
+      && linked.pre.gps === '-31.400000, -64.200000', JSON.stringify(linked.pre));
+    check('Evaluación queda vinculada (arbolId) y aparece en el detalle del árbol', !!linked.evId && linked.detailHasEval);
+
+    const after = await page.evaluate(() => { const s = calcCatastroStats(); return { total: s.total, vacios: s.sitiosVacios.length }; });
+    check('Árbol + su evaluación cuentan como 1 árbol', after.total === base.total + 1, base.total + ' → ' + after.total);
+
+    const vacio = await page.evaluate(async () => {
+      openFormRegistro();
+      selectRadio('rf-condicion', 'cazuela_vacia');
+      document.getElementById('rf-calle').value = 'Calle Vacía';
+      await saveRegistroRecord();
+      const s = calcCatastroStats();
+      return { total: s.total, vacios: s.sitiosVacios.length };
+    });
+    check('Cazuela vacía cuenta como sitio, no como árbol', vacio.total === after.total && vacio.vacios === after.vacios + 1,
+      JSON.stringify(vacio));
+
+    const badLink = await page.evaluate(async () => {
+      const n = records.length;
+      openForm();
+      document.getElementById('f-especie').value = 'Tipa';
+      document.getElementById('f-arbol').value = 'REG-NOEXISTE-9999';
+      await saveRecord();
+      return { n, n2: records.length, btn: document.getElementById('btn-save-main').disabled };
+    });
+    check('Código de árbol inexistente: no guarda y no deja el botón bloqueado', badLink.n === badLink.n2 && !badLink.btn);
+
+    // ── 8. Migración: sugerir vínculos para fichas existentes ──
+    const mig = await page.evaluate(async () => {
+      const now = new Date().toISOString();
+      const regB = { id: 'regB', tipo: 'registro', code: 'REG-MIG-0001', especie: 'Melia azedarach', gps: '-31.300000, -64.300000', updatedAt: now };
+      const evOk = { id: 'evOk', code: 'ARB-MIG-0001', especie: 'paraíso', gps: '-31.300015, -64.300000', riskLevel: 'high', updatedAt: now }; // ~1,7 m
+      const evOtra = { id: 'evOtra', code: 'ARB-MIG-0002', especie: 'Tipa', gps: '-31.300010, -64.300000', updatedAt: now };     // otra especie
+      const evLejos = { id: 'evLejos', code: 'ARB-MIG-0003', especie: 'Paraíso', gps: '-31.300200, -64.300000', updatedAt: now }; // ~22 m
+      for (const r of [regB, evOk, evOtra, evLejos]) { await dbPut(r); records.push(r); }
+      const before = calcCatastroStats().total;
+      const cands = candidatosVinculo().map(c => c.ev.id + '>' + c.reg.id);
+      renderCatastro();
+      document.querySelectorAll('.vinc-chk').forEach(c => { if (c.dataset.ev === 'evOk') c.checked = true; });
+      await vincularSeleccionadas();
+      const s = calcCatastroStats();
+      return { cands, arbolId: records.find(r => r.id === 'evOk').arbolId, before, after: s.total };
+    });
+    check('Migración sugiere solo mismo árbol (misma especie, < 5 m)',
+      mig.cands.includes('evOk>regB') && !mig.cands.some(c => c.startsWith('evOtra') || c.startsWith('evLejos')), mig.cands.join(', '));
+    check('Vincular marcadas asigna arbolId y deja de contar doble', mig.arbolId === 'regB' && mig.after === mig.before - 1,
+      mig.before + ' → ' + mig.after);
+
+    // ── 9. Fotos de registro consolidadas pasan a IndexedDB (aunque ya se haya migrado antes) ──
+    const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+    const fotoPayload = { _arborrisk_export: true, _inspector: 'X', records: [
+      { id: 'regFoto', tipo: 'registro', code: 'REG-FOT-0001', especie: 'Tipa', registroPhotos: [{ id: PNG, caption: 'frente' }], updatedAt: new Date().toISOString() }] };
+    await page.evaluate(async (json) => {
+      document.getElementById('merge-modal').classList.remove('open');
+      mergeImportData({ files: [new File([json], 'f.json')], value: '' });
+    }, JSON.stringify(fotoPayload));
+    await page.waitForFunction(() => document.getElementById('merge-modal').classList.contains('open'), { timeout: 15000 });
+    const foto = await page.evaluate(async () => {
+      const r = records.find(x => x.id === 'regFoto');
+      const p = r.registroPhotos[0];
+      return { isId: isPhotoId(p.id), caption: p.caption, blob: !!(await dbGetPhoto(p.id)) };
+    });
+    check('Foto de registro consolidada se migra a IndexedDB', foto.isId && foto.blob && foto.caption === 'frente', JSON.stringify(foto));
+
+    // ── 10. Exportaciones con los campos nuevos ──
+    const csv2 = await page.evaluate(async () => { window.__blobs = []; exportCSV(); return await window.__blobs[0].text(); });
+    const lines2 = csv2.replace(/^﻿/, '').split('\r\n');
+    const h2 = lines2[0].split(';');
+    const evLine = (lines2.find(l => l.startsWith('"ARB-MIG-0001"')) || '').split(';');
+    check('CSV incluye árbol vinculado, origen y sitio',
+      ['arbol_codigo', 'condicion_sitio', 'especie_comun', 'origen', 'calle', 'conflictos'].every(c => h2.includes(c))
+      && evLine[h2.indexOf('arbol_codigo')] === '"REG-MIG-0001"' && evLine[h2.indexOf('origen')] === '"exótica"',
+      evLine[h2.indexOf('arbol_codigo')] + ' / ' + evLine[h2.indexOf('origen')]);
+
     const relevantErrors = pageErrors.filter(e => !/jspdf|L is not defined|Leaflet|QRCode|markerCluster|cdnjs/i.test(e));
     check('Sin errores de JS propios', relevantErrors.length === 0, relevantErrors.slice(0, 3).join(' | '));
   } catch (e) {

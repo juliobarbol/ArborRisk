@@ -793,7 +793,7 @@
   .cat-section-title span { font-size: 15px; }
 
   /* Totales */
-  .cat-totals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; }
+  .cat-totals { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; }
   .cat-total-item { padding: 14px 10px; text-align: center; border-right: 1px solid var(--border); }
   .cat-total-item:last-child { border-right: none; }
   .cat-total-val { font-family: var(--head); font-size: 28px; font-weight: 700; line-height: 1; }
@@ -1324,6 +1324,12 @@
               <div class="autocomplete-list" id="ac-f-cliente"></div>
             </div>
           </div>
+          <div class="field-group">
+            <label class="field-label">Árbol del inventario (opcional)</label>
+            <input class="field-input" id="f-arbol" type="text" list="dl-arboles" placeholder="Código REG-… del árbol ya relevado" autocomplete="off" style="font-family:var(--mono)">
+            <datalist id="dl-arboles"></datalist>
+            <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:4px">Vincula esta evaluación con la ficha de registro del árbol: en el catastro se cuenta una sola vez.</div>
+          </div>
           <div class="field-row3">
             <div class="field-group">
               <label class="field-label">DAP (cm)</label>
@@ -1719,6 +1725,17 @@
         </div>
         <div class="section-body">
           <div class="field-group">
+            <label class="field-label">Condición del sitio</label>
+            <div class="radio-group" id="rf-condicion">
+              <div class="radio-item" onclick="selectRadio('rf-condicion','arbol')"><div class="radio-dot"></div><div class="radio-label">Árbol vivo</div></div>
+              <div class="radio-item" onclick="selectRadio('rf-condicion','seco')"><div class="radio-dot"></div><div class="radio-label">Ejemplar seco</div></div>
+              <div class="radio-item" onclick="selectRadio('rf-condicion','tocon')"><div class="radio-dot"></div><div class="radio-label">Tocón</div></div>
+              <div class="radio-item" onclick="selectRadio('rf-condicion','cazuela_vacia')"><div class="radio-dot"></div><div class="radio-label">Cazuela vacía</div></div>
+              <div class="radio-item" onclick="selectRadio('rf-condicion','apto_plantar')"><div class="radio-dot"></div><div class="radio-label">Apto para plantar</div></div>
+            </div>
+            <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:4px">Los sitios sin árbol (tocón, cazuela vacía, apto para plantar) se cuentan aparte para planificar la plantación.</div>
+          </div>
+          <div class="field-group">
             <label class="field-label">Denominación / nombre de referencia</label>
             <input class="field-input" id="rf-denominacion" type="text" placeholder="Ej. Tilo de la plaza, Árbol N°12…">
           </div>
@@ -1775,6 +1792,30 @@
           <div class="field-group">
             <label class="field-label">Ubicación específica</label>
             <input class="field-input" id="rf-ubicacion" type="text" placeholder="Nombre del espacio verde, calle y número…">
+          </div>
+          <div class="field-row3">
+            <div class="field-group" style="grid-column:span 2">
+              <label class="field-label">Calle</label>
+              <input class="field-input" id="rf-calle" type="text" placeholder="Ej. Av. San Martín">
+            </div>
+            <div class="field-group">
+              <label class="field-label">Altura (N°)</label>
+              <input class="field-input" id="rf-numero" type="number" placeholder="1250" min="0">
+            </div>
+          </div>
+          <div class="field-group">
+            <label class="field-label">Tipo de emplazamiento</label>
+            <select class="field-select" id="rf-emplazamiento">
+              <option value="">— Seleccionar —</option>
+              <option value="vereda">Vereda</option>
+              <option value="cantero_central">Cantero central / bulevar</option>
+              <option value="plaza">Plaza</option>
+              <option value="parque">Parque</option>
+              <option value="rotonda">Rotonda</option>
+              <option value="espacio_verde">Otro espacio verde</option>
+              <option value="predio_publico">Predio de edificio público</option>
+              <option value="otro">Otro</option>
+            </select>
           </div>
           <div class="field-group">
             <label class="field-label">Localización / Referencias del sitio</label>
@@ -1846,6 +1887,19 @@
           <div class="field-group">
             <label class="field-label">Instalaciones cercanas</label>
             <textarea class="field-textarea" id="rf-instalaciones" placeholder="Luminarias, cestos, bebederos, monumentos, edificios…" style="min-height:55px"></textarea>
+          </div>
+          <div class="field-group">
+            <label class="field-label">Conflictos con infraestructura</label>
+            <div class="relev-chip-wrap" id="rf-conflictos">
+              <div class="relev-chip" data-val="Tendido aéreo BT" onclick="this.classList.toggle('selected')">Tendido aéreo BT</div>
+              <div class="relev-chip" data-val="Tendido aéreo MT/AT" onclick="this.classList.toggle('selected')">Tendido aéreo MT/AT</div>
+              <div class="relev-chip" data-val="Luminaria" onclick="this.classList.toggle('selected')">Luminaria</div>
+              <div class="relev-chip" data-val="Señalización / semáforo" onclick="this.classList.toggle('selected')">Señalización / semáforo</div>
+              <div class="relev-chip" data-val="Levanta vereda" onclick="this.classList.toggle('selected')">Levanta vereda</div>
+              <div class="relev-chip" data-val="Daña cordón" onclick="this.classList.toggle('selected')">Daña cordón</div>
+              <div class="relev-chip" data-val="Fachada / edificación" onclick="this.classList.toggle('selected')">Fachada / edificación</div>
+              <div class="relev-chip" data-val="Cañerías / servicios subterráneos" onclick="this.classList.toggle('selected')">Cañerías / servicios subterráneos</div>
+            </div>
           </div>
           <div class="field-group">
             <label class="field-label">Perímetro</label>
@@ -2164,9 +2218,10 @@ async function resolvePhotoUrls(refs) {
 }
 
 // ── Migration: base64 → IDB blobs ────────────────────────────
-async function migratePhotosToIDB() {
-  // Skip if already migrated in this session or flagged as done
-  if (localStorage.getItem('arborrisk_migrated_v2') === '1') return;
+async function migratePhotosToIDB(force) {
+  // Al iniciar se saltea si ya se migró una vez. Después de importar/consolidar se
+  // llama con force=true: las fichas que llegan traen fotos en base64.
+  if (!force && localStorage.getItem('arborrisk_migrated_v2') === '1') return;
   var migrated = 0;
   for (var i = 0; i < records.length; i++) {
     var r = records[i];
@@ -2209,6 +2264,19 @@ async function migratePhotosToIDB() {
             }
           }
           ev.photos = newEvRefs;
+        }
+      }
+    }
+    // Fotos con epígrafe de la ficha de registro ({ id, caption })
+    if (r.registroPhotos && r.registroPhotos.length) {
+      for (var q = 0; q < r.registroPhotos.length; q++) {
+        var rp = r.registroPhotos[q];
+        if (rp && !isPhotoId(rp.id) && typeof rp.id === 'string' && rp.id.startsWith('data:')) {
+          var rid = newPhotoId();
+          await dbPutPhoto(rid, dataUrlToBlob(rp.id));
+          r.registroPhotos[q] = { id: rid, caption: rp.caption || '' };
+          changed = true;
+          migrated++;
         }
       }
     }
@@ -2443,21 +2511,34 @@ function autocompleteInput(fieldId, key) {
   var input = document.getElementById(fieldId);
   var listEl = document.getElementById('ac-' + fieldId);
   var query = (input.value || '').toLowerCase().trim();
-  var all = getAutocompleteList(key);
+  // Ítems { value, label }: value es lo que se escribe en el campo, label lo que se muestra
+  var all = getAutocompleteList(key).map(function(v) { return { value: v, label: v }; });
+  if (key === 'especies') {
+    // Sumar el catálogo (científico — común), sin repetir lo que ya está en el historial
+    var seen = {};
+    all.forEach(function(it) { seen[especieNormKey(normalizarEspecie(it.value))] = true; });
+    ESPECIES_CATALOGO.forEach(function(e) {
+      if (seen[especieNormKey(e[0])]) return;
+      all.push({ value: e[0], label: e[0] + ' — ' + e[1] });
+    });
+  }
+  var qKey = especieNormKey(query);
   var matches = query
-    ? all.filter(function(v) { return v.toLowerCase().includes(query); })
+    ? all.filter(function(it) {
+        return it.label.toLowerCase().includes(query) || (qKey && especieNormKey(it.label).includes(qKey));
+      })
     : all;
 
   if (matches.length === 0) { listEl.classList.remove('open'); return; }
 
   acIndex = -1;
-  listEl.innerHTML = matches.slice(0, 8).map(function(v) {
+  listEl.innerHTML = matches.slice(0, 8).map(function(it) {
     var icon = key === 'especies' ? '🌿' : '👤';
-    var vEsc = esc(v), qEsc = esc(query);
+    var vEsc = esc(it.label), qEsc = esc(query);
     var highlighted = query
       ? vEsc.replace(new RegExp('(' + qEsc.replace(/[.*+?^${}()|[\]\\]/g,'\\$&') + ')', 'gi'), '<strong>$1</strong>')
       : vEsc;
-    return '<div class="autocomplete-item" onmousedown="autocompleteSelect(\'' + fieldId + '\',this)">'
+    return '<div class="autocomplete-item" data-value="' + esc(it.value) + '" onmousedown="autocompleteSelect(\'' + fieldId + '\',this)">'
       + '<span class="autocomplete-item-icon">' + icon + '</span>'
       + highlighted
       + '</div>';
@@ -2468,7 +2549,7 @@ function autocompleteInput(fieldId, key) {
 function autocompleteSelect(fieldId, itemEl) {
   var input = document.getElementById(fieldId);
   // Get plain text (strip HTML tags from highlighted version)
-  input.value = itemEl.textContent.trim();
+  input.value = itemEl.dataset.value != null ? itemEl.dataset.value : itemEl.textContent.trim();
   document.getElementById('ac-' + fieldId).classList.remove('open');
   acIndex = -1;
   autosaveDraft();
@@ -2503,6 +2584,177 @@ function autocompleteKey(event, fieldId) {
     listEl.classList.remove('open');
     acIndex = -1;
   }
+}
+
+/* js/catalogo.js */
+// ============================================================
+// CATÁLOGO DE ESPECIES — arbolado urbano frecuente en Argentina
+// ============================================================
+// [nombre científico, nombre común, origen (respecto de Argentina), invasora, sinónimos/otros nombres]
+// "nativa" = nativa de Argentina (no necesariamente de la ecorregión local).
+// Se usa para normalizar lo que se escribe en campo ("fresno", "Fraxinus
+// pennsylvanica", "fresno americano" → una sola especie) y para las estadísticas.
+// Una especie fuera del catálogo se guarda tal cual se escribió. No se cargan
+// sinónimos de género ("olmo", "roble", "fresno"): asignarían una especie que no se verificó.
+var ESPECIES_CATALOGO = [
+  ['Acer negundo', 'Arce negundo', 'exótica', true, ['negundo']],
+  ['Albizia julibrissin', 'Acacia de Constantinopla', 'exótica', false, []],
+  ['Araucaria angustifolia', 'Pino Paraná', 'nativa', false, []],
+  ['Araucaria araucana', 'Pehuén', 'nativa', false, ['pehuen', 'araucaria chilena']],
+  ['Bauhinia forficata', 'Pata de vaca', 'nativa', false, []],
+  ['Brachychiton populneus', 'Braquiquito', 'exótica', false, ['brachichito', 'braquichito']],
+  ['Casuarina cunninghamiana', 'Casuarina', 'exótica', false, []],
+  ['Catalpa bignonioides', 'Catalpa', 'exótica', false, []],
+  ['Ceiba chodatii', 'Palo borracho blanco', 'nativa', false, []],
+  ['Ceiba speciosa', 'Palo borracho rosado', 'nativa', false, ['chorisia speciosa']],
+  ['Celtis australis', 'Almez', 'exótica', false, []],
+  ['Celtis ehrenbergiana', 'Tala', 'nativa', false, ['celtis tala']],
+  ['Citrus aurantium', 'Naranjo amargo', 'exótica', false, []],
+  ['Cordia americana', 'Guayubira', 'nativa', false, ['patagonula americana']],
+  ['Cupressus sempervirens', 'Ciprés italiano', 'exótica', false, []],
+  ['Enterolobium contortisiliquum', 'Timbó', 'nativa', false, ['oreja de negro', 'pacara', 'timbo colorado']],
+  ['Erythrina crista-galli', 'Ceibo', 'nativa', false, ['seibo']],
+  ['Eucalyptus camaldulensis', 'Eucalipto colorado', 'exótica', false, []],
+  ['Eugenia uniflora', 'Pitanga', 'nativa', false, ['ñangapiri']],
+  ['Ficus benjamina', 'Ficus', 'exótica', false, []],
+  ['Fraxinus excelsior', 'Fresno europeo', 'exótica', false, []],
+  ['Fraxinus pennsylvanica', 'Fresno americano', 'exótica', true, []],
+  ['Geoffroea decorticans', 'Chañar', 'nativa', false, []],
+  ['Gleditsia triacanthos', 'Acacia negra', 'exótica', true, ['acacia de tres espinas']],
+  ['Grevillea robusta', 'Grevillea', 'exótica', false, ['roble sedoso', 'roble australiano']],
+  ['Handroanthus albus', 'Lapacho amarillo', 'nativa', false, ['tabebuia alba']],
+  ['Handroanthus impetiginosus', 'Lapacho rosado', 'nativa', false, ['tabebuia impetiginosa', 'tabebuia avellanedae']],
+  ['Jacaranda mimosifolia', 'Jacarandá', 'nativa', false, ['tarco']],
+  ['Koelreuteria paniculata', 'Farolito chino', 'exótica', false, []],
+  ['Lagerstroemia indica', 'Crespón', 'exótica', false, []],
+  ['Ligustrum lucidum', 'Ligustro', 'exótica', true, []],
+  ['Liquidambar styraciflua', 'Liquidámbar', 'exótica', false, []],
+  ['Luehea divaricata', 'Francisco Álvarez', 'nativa', false, ['azota caballo']],
+  ['Magnolia grandiflora', 'Magnolia', 'exótica', false, []],
+  ['Melia azedarach', 'Paraíso', 'exótica', true, []],
+  ['Morus alba', 'Morera blanca', 'exótica', true, []],
+  ['Myrcianthes pungens', 'Guabiyú', 'nativa', false, []],
+  ['Parkinsonia aculeata', 'Cina-cina', 'nativa', false, ['cina cina']],
+  ['Peltophorum dubium', 'Ibirá pitá', 'nativa', false, ['caña fistola', 'cañafistola', 'ibira pita']],
+  ['Phoenix canariensis', 'Palmera canaria', 'exótica', false, ['palmera fénix']],
+  ['Phytolacca dioica', 'Ombú', 'nativa', false, []],
+  ['Pinus halepensis', 'Pino de Alepo', 'exótica', false, []],
+  ['Platanus × hispanica', 'Plátano', 'exótica', false, ['platanus acerifolia', 'platanus hispanica', 'platano']],
+  ['Populus alba', 'Álamo plateado', 'exótica', true, ['alamo blanco']],
+  ['Populus nigra', 'Álamo criollo', 'exótica', false, ['alamo piramidal', 'populus nigra italica']],
+  ['Prosopis alba', 'Algarrobo blanco', 'nativa', false, []],
+  ['Prosopis nigra', 'Algarrobo negro', 'nativa', false, []],
+  ['Prunus cerasifera', 'Ciruelo de jardín', 'exótica', false, ['ciruelo de flor', 'prunus pissardii']],
+  ['Pyrus calleryana', 'Peral de flor', 'exótica', false, ['peral de callery']],
+  ['Quercus palustris', 'Roble de los pantanos', 'exótica', false, []],
+  ['Quercus robur', 'Roble europeo', 'exótica', false, []],
+  ['Robinia pseudoacacia', 'Acacia blanca', 'exótica', true, ['falsa acacia']],
+  ['Salix babylonica', 'Sauce llorón', 'exótica', false, []],
+  ['Salix humboldtiana', 'Sauce criollo', 'nativa', false, []],
+  ['Schinus molle', 'Aguaribay', 'nativa', false, ['molle', 'falso pimiento', 'schinus areira']],
+  ['Styphnolobium japonicum', 'Sófora', 'exótica', false, ['sophora japonica', 'acacia japonesa']],
+  ['Syagrus romanzoffiana', 'Pindó', 'nativa', false, ['arecastrum romanzoffianum']],
+  ['Tecoma stans', 'Guaran amarillo', 'nativa', false, ['guarán amarillo']],
+  ['Tilia × moltkei', 'Tilo', 'exótica', false, []],
+  ['Tipuana tipu', 'Tipa', 'nativa', false, ['tipa blanca']],
+  ['Ulmus pumila', 'Olmo siberiano', 'exótica', true, []],
+  ['Vachellia caven', 'Espinillo', 'nativa', false, ['acacia caven', 'aromo criollo']],
+  ['Washingtonia filifera', 'Washingtonia', 'exótica', false, []],
+  ['Washingtonia robusta', 'Washingtonia robusta', 'exótica', false, []]
+];
+
+// Clave de comparación: minúsculas, sin acentos, sin marca de híbrido (× / x), espacios simples.
+function especieNormKey(s) {
+  return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/×/g, ' ').replace(/\s+x\s+/g, ' ').replace(/['"‘’“”().,]/g, ' ')
+    .replace(/\s+/g, ' ').trim();
+}
+
+var _especiesIndex = null;
+function especiesIndex() {
+  if (_especiesIndex) return _especiesIndex;
+  _especiesIndex = {};
+  ESPECIES_CATALOGO.forEach(function(e) {
+    var info = { cientifico: e[0], comun: e[1], origen: e[2], invasora: e[3] };
+    [e[0], e[1]].concat(e[4]).forEach(function(n) {
+      var k = especieNormKey(n);
+      if (k && !_especiesIndex[k]) _especiesIndex[k] = info;
+    });
+  });
+  return _especiesIndex;
+}
+
+// Devuelve la entrada del catálogo para un texto libre, o null si no está.
+// Acepta autor o cultivar después del binomio ("Quercus robur L.", "Prunus cerasifera 'Atropurpurea'").
+function buscarEspecie(text) {
+  var k = especieNormKey(text);
+  if (!k) return null;
+  var idx = especiesIndex();
+  if (idx[k]) return idx[k];
+  var two = k.split(' ').slice(0, 2).join(' ');
+  var hit = idx[two];
+  return hit && especieNormKey(hit.cientifico) === two ? hit : null;
+}
+
+// Nombre canónico (científico) si está en el catálogo; si no, el texto tal cual.
+function normalizarEspecie(text) {
+  var e = buscarEspecie(text);
+  return e ? e.cientifico : String(text || '').trim();
+}
+
+// ── Sitio (ficha de registro) ──
+var CONDICION_LABEL = { arbol: 'Árbol vivo', seco: 'Ejemplar seco', tocon: 'Tocón', cazuela_vacia: 'Cazuela vacía', apto_plantar: 'Apto para plantar' };
+var EMPLAZAMIENTO_LABEL = { vereda: 'Vereda', cantero_central: 'Cantero central / bulevar', plaza: 'Plaza', parque: 'Parque', rotonda: 'Rotonda',
+  espacio_verde: 'Otro espacio verde', predio_publico: 'Predio de edificio público', otro: 'Otro' };
+
+// Un registro sin árbol (tocón, cazuela vacía, sitio apto) no cuenta como árbol en el catastro.
+function esSitioSinArbol(r) {
+  return !!r && r.tipo === 'registro' && ['tocon', 'cazuela_vacia', 'apto_plantar'].indexOf(r.condicionSitio) >= 0;
+}
+
+// ── Vínculo árbol (ficha de registro) ↔ evaluaciones de riesgo (campo arbolId) ──
+function registroPorCodigo(code) {
+  var c = String(code || '').trim().toUpperCase();
+  if (!c) return null;
+  return records.find(function(x) { return x.tipo === 'registro' && (x.code || '').toUpperCase() === c; }) || null;
+}
+
+function arbolDeEvaluacion(r) {
+  if (!r || !r.arbolId) return null;
+  return records.find(function(x) { return x.id === r.arbolId && x.tipo === 'registro'; }) || null;
+}
+
+function evaluacionesDeArbol(regId) {
+  return records.filter(function(x) { return x.tipo !== 'registro' && x.arbolId === regId; });
+}
+
+// La más reciente por fecha de inspección (y, a igual fecha, por última modificación).
+function ultimaEvaluacion(list) {
+  if (!list || !list.length) return null;
+  return list.slice().sort(function(a, b) {
+    var f = (b.fecha || '').localeCompare(a.fecha || '');
+    return f !== 0 ? f : (b.updatedAt || '').localeCompare(a.updatedAt || '');
+  })[0];
+}
+
+function fillArbolDatalist() {
+  var dl = document.getElementById('dl-arboles');
+  if (!dl) return;
+  dl.innerHTML = records.filter(function(r) { return r.tipo === 'registro' && r.code && !esSitioSinArbol(r); })
+    .map(function(r) {
+      var desc = [r.especie, direccionLabel(r) || r.ubicacion].filter(Boolean).join(' · ');
+      return '<option value="' + esc(r.code) + '">' + esc(desc) + '</option>';
+    }).join('');
+}
+
+function direccionLabel(r) {
+  return [r.calle, r.numero].filter(Boolean).join(' ');
+}
+
+function especieInfoLabel(text) {
+  var e = buscarEspecie(text);
+  if (!e) return text ? 'Fuera del catálogo' : '';
+  return e.comun + ' · ' + e.origen + (e.invasora ? ' · ⚠ invasora' : '');
 }
 
 // ============================================================
@@ -2609,15 +2861,18 @@ function openFormRegistro(id) {
   // Clear all fields
   ['rf-denominacion','rf-especie','rf-cantidad','rf-anio','rf-dap','rf-altura','rf-copa',
    'rf-ubicacion','rf-barrio','rf-gestionado','rf-plantera','rf-solado','rf-instalaciones',
-   'rf-puntales','rf-carteleria','rf-inspector','rf-descripcion','rf-observaciones','rf-localizacion'].forEach(function(fid) {
+   'rf-puntales','rf-carteleria','rf-inspector','rf-descripcion','rf-observaciones','rf-localizacion',
+   'rf-calle','rf-numero','rf-emplazamiento'].forEach(function(fid) {
     var el = document.getElementById(fid);
     if (el) el.value = '';
   });
   document.getElementById('rf-propietario').value = '';
-  ['rf-acceso','rf-estado','rf-perimetro'].forEach(function(g) {
+  ['rf-acceso','rf-estado','rf-perimetro','rf-condicion'].forEach(function(g) {
     var el = document.getElementById(g);
     if (el) { el.dataset.val = ''; el.querySelectorAll('.radio-item').forEach(function(i) { i.classList.remove('selected'); }); }
   });
+  clearChips('rf-conflictos');
+  setRadio('rf-condicion', 'arbol');
 
   if (id) {
     var r = records.find(function(x) { return x.id === id; });
@@ -2649,6 +2904,11 @@ function openFormRegistro(id) {
     setRadio('rf-acceso', r.acceso);
     setRadio('rf-estado', r.estado);
     setRadio('rf-perimetro', r.perimetro);
+    setRadio('rf-condicion', r.condicionSitio || 'arbol');
+    document.getElementById('rf-calle').value = r.calle || '';
+    document.getElementById('rf-numero').value = r.numero || '';
+    document.getElementById('rf-emplazamiento').value = r.emplazamiento || '';
+    setChips('rf-conflictos', r.conflictos);
     currentRegistroPhotos = r.registroPhotos ? r.registroPhotos.map(function(p) { return Object.assign({}, p); }) : [];
     document.getElementById('rf-btn-delete').style.display = 'flex';
   } else {
@@ -2955,7 +3215,8 @@ async function saveRegistroRecord() {
       tipo: 'registro',
       code: code || genCodeRegistro(),
       denominacion: document.getElementById('rf-denominacion').value,
-      especie: document.getElementById('rf-especie').value,
+      especie: normalizarEspecie(document.getElementById('rf-especie').value),
+      condicionSitio: getRadio('rf-condicion') || 'arbol',
       cantidad: document.getElementById('rf-cantidad').value,
       anio: document.getElementById('rf-anio').value,
       dap: document.getElementById('rf-dap').value,
@@ -2965,6 +3226,10 @@ async function saveRegistroRecord() {
       ubicacion: document.getElementById('rf-ubicacion').value,
       localizacion: document.getElementById('rf-localizacion').value,
       barrio: document.getElementById('rf-barrio').value,
+      calle: document.getElementById('rf-calle').value.trim(),
+      numero: document.getElementById('rf-numero').value,
+      emplazamiento: document.getElementById('rf-emplazamiento').value,
+      conflictos: getChips('rf-conflictos'),
       propietario: document.getElementById('rf-propietario').value,
       acceso: getRadio('rf-acceso'),
       gestionado: document.getElementById('rf-gestionado').value,
@@ -3009,7 +3274,9 @@ function deleteRegistroRecord() {
   if (!currentRegistroId) return;
   var r = records.find(function(x) { return x.id === currentRegistroId; });
   var label = r ? (r.code || '') + (r.especie ? ' — ' + r.especie : '') : 'este registro';
-  showConfirm('¿Eliminar registro?', 'Se eliminará permanentemente: ' + label + '. Esta acción no se puede deshacer.', async function() {
+  var vinculadas = r ? evaluacionesDeArbol(r.id).length : 0;
+  var aviso = vinculadas ? ' Tiene ' + vinculadas + ' evaluación(es) de riesgo vinculada(s): quedarán como fichas independientes.' : '';
+  showConfirm('¿Eliminar registro?', 'Se eliminará permanentemente: ' + label + '. Esta acción no se puede deshacer.' + aviso, async function() {
     await dbDelete(currentRegistroId);
     records = records.filter(function(r) { return r.id !== currentRegistroId; });
     // Limpiar fotos huérfanas en background
@@ -3504,7 +3771,7 @@ function renderList(filtered, keepPage) {
       ? 'risk-registro'
       : r.riskLevel === 'high' ? 'risk-high' : r.riskLevel === 'mod' ? 'risk-mod' : 'risk-low';
     const riskText = r.tipo === 'registro'
-      ? 'REGISTRO'
+      ? (esSitioSinArbol(r) ? (CONDICION_LABEL[r.condicionSitio] || 'SITIO').toUpperCase() : 'REGISTRO')
       : r.riskLevel === 'high' ? 'ALTO' : r.riskLevel === 'mod' ? 'MODERADO' : r.riskLevel === 'low' ? 'BAJO' : '—';
     const photoRef = r.tipo === 'registro'
       ? (r.registroPhotos && r.registroPhotos[0] ? r.registroPhotos[0].id : null)
@@ -3650,6 +3917,7 @@ async function openDetail(id) {
   var riskClass = r.riskLevel === 'high' ? 'risk-high' : r.riskLevel === 'mod' ? 'risk-mod' : 'risk-low';
   var riskText  = r.riskLevel === 'high' ? 'RIESGO ALTO' : r.riskLevel === 'mod' ? 'RIESGO MODERADO' : r.riskLevel === 'low' ? 'RIESGO BAJO' : '—';
   var allDefects = [].concat(r.defRaices || [], r.defTronco || [], r.defRamas || []);
+  var arbolVinculado = arbolDeEvaluacion(r);
 
   // GPS Maps link
   var gpsHtml = '';
@@ -3748,7 +4016,11 @@ async function openDetail(id) {
     + '<div class="detail-section">'
     +   '<div class="detail-section-title">Identificación</div>'
     +   '<div class="detail-row"><div class="detail-key">Código</div><div class="detail-val">' + esc(r.code || '—') + '</div></div>'
-    +   '<div class="detail-row"><div class="detail-key">Especie</div><div class="detail-val" style="font-style:italic">' + esc(r.especie || '—') + '</div></div>'
+    +   (arbolVinculado
+          ? '<div class="detail-row"><div class="detail-key">Árbol</div><div class="detail-val"><a href="#" class="gps-link" onclick="openDetail(\'' + esc(arbolVinculado.id) + '\');return false">🌳 ' + esc(arbolVinculado.code) + ' — ficha de registro</a></div></div>'
+          : '')
+    +   '<div class="detail-row"><div class="detail-key">Especie</div><div class="detail-val"><span style="font-style:italic">' + esc(r.especie || '—') + '</span>'
+    +     (r.especie ? '<div style="font-size:10px;color:var(--text3)">' + esc(especieInfoLabel(r.especie)) + '</div>' : '') + '</div></div>'
     +   '<div class="detail-row"><div class="detail-key">Cliente</div><div class="detail-val">' + esc(r.cliente || '—') + '</div></div>'
     +   '<div class="detail-row"><div class="detail-key">Fecha</div><div class="detail-val">' + esc(r.fecha || '—') + '</div></div>'
     +   '<div class="detail-row"><div class="detail-key">DAP</div><div class="detail-val">' + (r.dap ? esc(r.dap) + ' cm' : '—') + '</div></div>'
@@ -3846,12 +4118,16 @@ async function openDetailRegistro(r) {
   var body =
     '<div class="detail-section">'
     + '<div class="detail-section-title">Estado del Árbol</div>'
+    + (r.condicionSitio && r.condicionSitio !== 'arbol'
+        ? '<div class="detail-row"><div class="detail-key">Condición del sitio</div><div class="detail-val" style="font-weight:700">' + esc(CONDICION_LABEL[r.condicionSitio] || r.condicionSitio) + '</div></div>'
+        : '')
     + estadoBadge
     + '</div>'
     + '<div class="detail-section"><div class="detail-section-title">Identificación</div>'
     + '<div class="detail-row"><div class="detail-key">Código</div><div class="detail-val">' + esc(r.code || '—') + '</div></div>'
     + '<div class="detail-row"><div class="detail-key">Denominación</div><div class="detail-val">' + esc(r.denominacion || '—') + '</div></div>'
-    + '<div class="detail-row"><div class="detail-key">Especie</div><div class="detail-val" style="font-style:italic">' + esc(r.especie || '—') + '</div></div>'
+    + '<div class="detail-row"><div class="detail-key">Especie</div><div class="detail-val"><span style="font-style:italic">' + esc(r.especie || '—') + '</span>'
+    +   (r.especie ? '<div style="font-size:10px;color:var(--text3)">' + esc(especieInfoLabel(r.especie)) + '</div>' : '') + '</div></div>'
     + '<div class="detail-row"><div class="detail-key">Cantidad</div><div class="detail-val">' + esc(r.cantidad || '—') + '</div></div>'
     + '<div class="detail-row"><div class="detail-key">Año plantación</div><div class="detail-val">' + esc(r.anio || '—') + '</div></div>'
     + '<div class="detail-row"><div class="detail-key">DAP</div><div class="detail-val">' + (r.dap ? esc(r.dap) + ' cm' : '—') + '</div></div>'
@@ -3862,6 +4138,8 @@ async function openDetailRegistro(r) {
     + '</div>'
     + '<div class="detail-section"><div class="detail-section-title">Ubicación</div>'
     + '<div class="detail-row"><div class="detail-key">Ubicación</div><div class="detail-val">' + esc(r.ubicacion || '—') + '</div></div>'
+    + (direccionLabel(r) ? '<div class="detail-row"><div class="detail-key">Dirección</div><div class="detail-val">' + esc(direccionLabel(r)) + '</div></div>' : '')
+    + (r.emplazamiento ? '<div class="detail-row"><div class="detail-key">Emplazamiento</div><div class="detail-val">' + esc(EMPLAZAMIENTO_LABEL[r.emplazamiento] || r.emplazamiento) + '</div></div>' : '')
     + (r.localizacion ? '<div class="detail-row"><div class="detail-key">Referencias</div><div class="detail-val">' + esc(r.localizacion) + '</div></div>' : '')
     + '<div class="detail-row"><div class="detail-key">Barrio</div><div class="detail-val">' + esc(r.barrio || '—') + '</div></div>'
     + '<div class="detail-row"><div class="detail-key">Propietario</div><div class="detail-val">' + esc(r.propietario || '—') + '</div></div>'
@@ -3873,6 +4151,7 @@ async function openDetailRegistro(r) {
     + (r.plantera ? '<div class="detail-row"><div class="detail-key">Plantera</div><div class="detail-val">' + esc(r.plantera) + '</div></div>' : '')
     + (r.solado ? '<div class="detail-row"><div class="detail-key">Solado</div><div class="detail-val">' + esc(r.solado) + '</div></div>' : '')
     + (r.instalaciones ? '<div class="detail-row"><div class="detail-key">Instalaciones</div><div class="detail-val">' + esc(r.instalaciones) + '</div></div>' : '')
+    + (r.conflictos && r.conflictos.length ? '<div class="detail-row"><div class="detail-key">Conflictos</div><div class="detail-val">' + esc(r.conflictos.join(', ')) + '</div></div>' : '')
     + (r.perimetro ? '<div class="detail-row"><div class="detail-key">Perímetro</div><div class="detail-val">' + esc(r.perimetro.replace('_',' ')) + '</div></div>' : '')
     + (r.puntales ? '<div class="detail-row"><div class="detail-key">Puntales</div><div class="detail-val">' + esc(r.puntales) + '</div></div>' : '')
     + (r.carteleria ? '<div class="detail-row"><div class="detail-key">Cartelería</div><div class="detail-val">' + esc(r.carteleria) + '</div></div>' : '')
@@ -3883,6 +4162,7 @@ async function openDetailRegistro(r) {
         + (r.observaciones ? '<div class="detail-row"><div class="detail-key">Observaciones</div><div class="detail-val">' + esc(r.observaciones) + '</div></div>' : '')
         + '</div>'
       : '')
+    + buildEvaluacionesArbolSection(r)
     + photosHtml;
 
   document.getElementById('detail-body').innerHTML = body;
@@ -4307,6 +4587,47 @@ function openNewEval() {
   openForm(id, true);
 }
 
+// Nueva evaluación de riesgo para un árbol ya inventariado: prellena la identificación
+// desde la ficha de registro y deja la evaluación vinculada (arbolId).
+function openEvalFromArbol(regId) {
+  var a = records.find(function(x) { return x.id === regId && x.tipo === 'registro'; });
+  if (!a) return;
+  closeDetail();
+  openForm();
+  document.getElementById('f-especie').value = a.especie || '';
+  document.getElementById('f-cliente').value = getInspectorConfig().proyecto || a.ubicacion || '';
+  document.getElementById('f-dap').value = a.dap || '';
+  document.getElementById('f-altura').value = a.altura || '';
+  document.getElementById('f-copa').value = a.copa || '';
+  setGpsMeta('gps-display', a.gps || '', a.gpsFuente, a.gpsPrecision);
+  document.getElementById('f-arbol').value = a.code || '';
+  // No ofrecer el borrador de otra ficha: esta ya viene prellenada
+  document.getElementById('draft-bar').style.display = 'none';
+}
+
+function buildEvaluacionesArbolSection(r) {
+  var RISK_LABEL = { high: 'ALTO', mod: 'MODERADO', low: 'BAJO' };
+  var evs = evaluacionesDeArbol(r.id).sort(function(a, b) { return (b.fecha || '').localeCompare(a.fecha || ''); });
+  var html = '<div class="detail-section"><div class="detail-section-title">Evaluaciones de riesgo (' + evs.length + ')</div>';
+  if (!evs.length) {
+    html += '<div style="font-size:12px;color:var(--text3);padding:6px 0">Este árbol todavía no tiene evaluación de riesgo.</div>';
+  }
+  evs.forEach(function(ev) {
+    var cls = ev.riskLevel === 'high' ? 'risk-high' : ev.riskLevel === 'mod' ? 'risk-mod' : 'risk-low';
+    html += '<div class="detail-row" style="cursor:pointer" onclick="openDetail(\'' + esc(ev.id) + '\')">'
+      + '<div class="detail-key" style="font-family:var(--mono)">' + esc(ev.code || '—') + '</div>'
+      + '<div class="detail-val">' + esc(ev.fecha || '—') + ' '
+      + (ev.riskLevel ? '<span class="risk-badge ' + cls + '" style="font-size:8px;padding:1px 6px">' + RISK_LABEL[ev.riskLevel] + '</span>' : '')
+      + ' ›</div></div>';
+  });
+  if (!esSitioSinArbol(r)) {
+    html += '<button type="button" onclick="openEvalFromArbol(\'' + esc(r.id) + '\')" '
+      + 'style="width:100%;margin-top:8px;padding:10px;background:var(--surface2);border:1.5px dashed var(--border);'
+      + 'border-radius:10px;color:var(--accent);font-size:13px;cursor:pointer;font-weight:600">＋ Evaluación de riesgo</button>';
+  }
+  return html + '</div>';
+}
+
 function openForm(id, newEval) {
   id = id || null;
   newEval = newEval || false;
@@ -4319,6 +4640,8 @@ function openForm(id, newEval) {
   buildCheckGroup('chk-ramas', DEFECTS.ramas, 'ramas');
   buildCheckGroup('chk-evalavanzada', EVAL_AVANZADA, 'evalavz');
   buildCheckGroup('chk-tratamiento', TRATAMIENTO, 'tratam');
+  fillArbolDatalist();
+  document.getElementById('f-arbol').value = '';
 
   const today = new Date().toISOString().split('T')[0];
 
@@ -4334,6 +4657,7 @@ function openForm(id, newEval) {
     document.getElementById('f-altura').value = r.altura || '';
     document.getElementById('f-copa').value = r.copa || '';
     setGpsMeta('gps-display', r.gps || '', r.gpsFuente, r.gpsPrecision);
+    document.getElementById('f-arbol').value = (arbolDeEvaluacion(r) || {}).code || '';
     document.getElementById('f-suelo').value = r.suelo || '';
     document.getElementById('f-viento').value = r.viento || '';
     document.getElementById('f-historia').value = r.historia || '';
@@ -4470,6 +4794,9 @@ async function saveRecord() {
   const risk = calcRisk();
   const existing = currentId ? records.find(r => r.id === currentId) : null;
   const code = existing ? existing.code : document.getElementById('modal-code').textContent;
+  const arbolCode = document.getElementById('f-arbol').value.trim();
+  const arbol = arbolCode ? registroPorCodigo(arbolCode) : null;
+  if (arbolCode && !arbol) { showToast('No hay ninguna ficha de registro con el código ' + arbolCode, 'error'); return; }
 
   // Build the snapshot of the current evaluation fields
   const evalSnapshot = {
@@ -4566,7 +4893,7 @@ async function saveRecord() {
     id: currentId || newRecordId(),
     code,
     // Identification (never changes on eval update)
-    especie:  document.getElementById('f-especie').value,
+    especie:  normalizarEspecie(document.getElementById('f-especie').value),
     cliente:  document.getElementById('f-cliente').value,
     dap:      document.getElementById('f-dap').value,
     altura:   document.getElementById('f-altura').value,
@@ -4578,6 +4905,8 @@ async function saveRecord() {
     evaluaciones: newHistory,
     // Historial de trabajos (se preserva, se edita desde el detalle)
     trabajos: existing ? (existing.trabajos || []) : [],
+    // Árbol del inventario al que pertenece esta evaluación ('' = ficha independiente)
+    arbolId: arbol ? arbol.id : '',
     ...auditFields(existing),
     updatedAt: new Date().toISOString(),
   };
@@ -5548,7 +5877,7 @@ function importData(input) {
         await dbClear();
         for (const rec of valid) await dbPut(rec);
         records = valid;
-        await migratePhotosToIDB();
+        await migratePhotosToIDB(true);
         await cleanupOrphanPhotos();
         // Rebuild autocomplete
         try { localStorage.removeItem('arborrisk_ac_especies'); } catch(e) {}
@@ -6156,6 +6485,166 @@ function closeProjectSheet(e) {
 <script>
 /* js/projects.js */
 // ============================================================
+// ============================================================
+// MIGRACIÓN — vincular evaluaciones existentes con su árbol inventariado
+// ============================================================
+// Antes del campo arbolId, un árbol relevado y luego evaluado quedaba como dos
+// fichas sueltas. Se sugieren pares evaluación ↔ registro a menos de
+// VINCULO_MAX_M metros y de la misma especie (o sin especie en alguno);
+// el usuario confirma cuáles vincular. Nunca se vincula automáticamente.
+var VINCULO_MAX_M = 5;
+
+function distanciaM(a, b) {
+  var R = 6371000, toRad = Math.PI / 180;
+  var dLat = (b.lat - a.lat) * toRad, dLon = (b.lon - a.lon) * toRad;
+  var h = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+    + Math.cos(a.lat * toRad) * Math.cos(b.lat * toRad) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+function candidatosVinculo() {
+  // Grilla de ~0,0001° (≈ 9–11 m en Argentina): basta revisar la celda y sus 8 vecinas
+  var CELL = 0.0001, grid = {};
+  function cellKey(lat, lon) { return Math.floor(lat / CELL) + ':' + Math.floor(lon / CELL); }
+  records.forEach(function(r) {
+    if (r.tipo !== 'registro' || esSitioSinArbol(r)) return;
+    var p = parseGps(r.gps);
+    if (!p) return;
+    var k = cellKey(p.lat, p.lon);
+    (grid[k] = grid[k] || []).push({ r: r, p: p });
+  });
+  var byId = indexById();
+  var out = [];
+  records.forEach(function(ev) {
+    if (ev.tipo === 'registro') return;
+    var a = ev.arbolId ? byId[ev.arbolId] : null;
+    if (a && a.tipo === 'registro') return;               // ya vinculada
+    var p = parseGps(ev.gps);
+    if (!p) return;
+    var cy = Math.floor(p.lat / CELL), cx = Math.floor(p.lon / CELL);
+    var best = null, bestD = Infinity;
+    for (var dy = -1; dy <= 1; dy++) for (var dx = -1; dx <= 1; dx++) {
+      (grid[(cy + dy) + ':' + (cx + dx)] || []).forEach(function(c) {
+        var d = distanciaM(p, c.p);
+        if (d < bestD) { bestD = d; best = c.r; }
+      });
+    }
+    if (!best || bestD > VINCULO_MAX_M) return;
+    var e1 = especieNormKey(normalizarEspecie(ev.especie)), e2 = especieNormKey(normalizarEspecie(best.especie));
+    if (e1 && e2 && e1 !== e2) return;                     // especies distintas: no es el mismo árbol
+    out.push({ ev: ev, reg: best, d: bestD });
+  });
+  return out.sort(function(x, y) { return x.d - y.d; });
+}
+
+function buildVinculoSection() {
+  var cands = candidatosVinculo();
+  if (!cands.length) return '';
+  var MAX = 50;
+  var html = '<div class="cat-section" style="margin-bottom:14px" id="vinculo-section">'
+    + '<div class="cat-section-title"><span>🔗</span> Posibles árboles duplicados (' + cands.length + ')</div>'
+    + '<div style="padding:4px 14px 8px;font-size:12px;color:var(--text2)">Estas evaluaciones de riesgo están a menos de '
+    + VINCULO_MAX_M + ' m de un árbol inventariado de la misma especie. Marcá las que sean el mismo árbol y vinculalas: '
+    + 'así se cuentan una sola vez.</div>';
+  cands.slice(0, MAX).forEach(function(c) {
+    html += '<label style="display:flex;gap:8px;align-items:center;padding:7px 14px;border-top:1px solid var(--border);font-family:var(--mono);font-size:11px;cursor:pointer">'
+      + '<input type="checkbox" class="vinc-chk" data-ev="' + esc(c.ev.id) + '" data-reg="' + esc(c.reg.id) + '">'
+      + '<span style="flex:1">' + esc(c.ev.code || '—') + ' → ' + esc(c.reg.code || '—')
+      + ' <span style="color:var(--text3)">· ' + c.d.toFixed(1) + ' m · ' + esc(c.ev.especie || c.reg.especie || 'sin especie') + '</span></span>'
+      + '</label>';
+  });
+  if (cands.length > MAX) {
+    html += '<div style="padding:6px 14px;font-family:var(--mono);font-size:10px;color:var(--text3)">Se muestran ' + MAX
+      + '. Al vincular, se recalculan los siguientes.</div>';
+  }
+  html += '<div style="display:flex;gap:8px;padding:10px 14px">'
+    + '<button type="button" class="btn-cancel" style="flex:1" onclick="document.querySelectorAll(\'.vinc-chk\').forEach(function(c){c.checked=true})">Marcar todas</button>'
+    + '<button type="button" class="btn-save" style="flex:1;justify-content:center" onclick="vincularSeleccionadas()">🔗 Vincular marcadas</button>'
+    + '</div></div>';
+  return html;
+}
+
+async function vincularSeleccionadas() {
+  var chks = Array.from(document.querySelectorAll('.vinc-chk:checked'));
+  if (!chks.length) { showToast('Marcá al menos un par para vincular', 'error'); return; }
+  var byId = indexById();
+  var n = 0, now = new Date().toISOString(), quien = auditFields(null).modificadoPor;
+  for (var i = 0; i < chks.length; i++) {
+    var ev = byId[chks[i].dataset.ev], reg = byId[chks[i].dataset.reg];
+    if (!ev || !reg || reg.tipo !== 'registro') continue;
+    ev.arbolId = reg.id;
+    ev.updatedAt = now;
+    ev.modificadoPor = quien;
+    await dbPut(ev);
+    n++;
+  }
+  showToast('🔗 ' + n + ' evaluación(es) vinculadas a su árbol', 'success');
+  applyFilters();
+  renderCatastro();
+}
+
+// ============================================================
+// ESTADÍSTICAS DEL CATASTRO — por árbol, no por ficha
+// ============================================================
+// Unidad del catastro = cada ficha de registro (el árbol/sitio inventariado) más
+// cada ficha de riesgo que NO está vinculada a un registro existente.
+// Así un árbol inventariado y luego evaluado se cuenta una sola vez.
+// Lo usan el panel (renderCatastro) y el PDF (exportCatastroPDF).
+function calcCatastroStats() {
+  var byId = {};
+  records.forEach(function(r) { byId[r.id] = r; });
+  var registros = records.filter(function(r) { return r.tipo === 'registro'; });
+  var riesgo = records.filter(function(r) { return r.tipo !== 'registro'; });
+  var evalsPorArbol = {}, sueltas = [];
+  riesgo.forEach(function(r) {
+    var a = r.arbolId ? byId[r.arbolId] : null;
+    if (a && a.tipo === 'registro') (evalsPorArbol[a.id] = evalsPorArbol[a.id] || []).push(r);
+    else sueltas.push(r);
+  });
+  var unidades = registros.concat(sueltas);
+  var arboles = unidades.filter(function(u) { return !esSitioSinArbol(u); });
+  var sitiosVacios = unidades.filter(esSitioSinArbol);
+
+  function evalsDe(u) { return u.tipo === 'registro' ? (evalsPorArbol[u.id] || []) : [u]; }
+  function nivel(u) { var ev = ultimaEvaluacion(evalsDe(u)); return ev ? (ev.riskLevel || '') : ''; }
+  function tieneGps(u) { return !!((u.gps && u.gps.trim()) || evalsDe(u).some(function(e) { return e.gps && e.gps.trim(); })); }
+  function tieneFotos(u) {
+    return !!((u.photos && u.photos.length) || (u.registroPhotos && u.registroPhotos.length)
+      || evalsDe(u).some(function(e) { return e.photos && e.photos.length; }));
+  }
+
+  var st = {
+    registros: registros, riesgo: riesgo, unidades: unidades, arboles: arboles, sitiosVacios: sitiosVacios,
+    vinculadas: riesgo.length - sueltas.length,
+    total: arboles.length,
+    conGPS: unidades.filter(tieneGps).length,
+    conFotos: unidades.filter(tieneFotos).length,
+    high: 0, mod: 0, low: 0, sinEval: 0,
+    especies: [], origen: { nativa: 0, 'exótica': 0, invasora: 0, fuera: 0, sinEspecie: 0 },
+    sitiosPorCondicion: {}
+  };
+  arboles.forEach(function(u) {
+    var n = nivel(u);
+    if (n === 'high') st.high++; else if (n === 'mod') st.mod++; else if (n === 'low') st.low++; else st.sinEval++;
+  });
+
+  // Especies agrupadas por nombre normalizado (catálogo)
+  var espMap = {};
+  arboles.forEach(function(u) {
+    if (!u.especie || !u.especie.trim()) { st.origen.sinEspecie++; return; }
+    var e = buscarEspecie(u.especie);
+    var key = e ? e.cientifico : u.especie.trim();
+    espMap[key] = (espMap[key] || 0) + 1;
+    if (!e) st.origen.fuera++;
+    else { st.origen[e.origen] = (st.origen[e.origen] || 0) + 1; if (e.invasora) st.origen.invasora++; }
+  });
+  st.especies = Object.entries(espMap).sort(function(a, b) { return b[1] - a[1]; });
+  sitiosVacios.forEach(function(u) {
+    st.sitiosPorCondicion[u.condicionSitio] = (st.sitiosPorCondicion[u.condicionSitio] || 0) + 1;
+  });
+  return st;
+}
+
 function renderCatastro() {
   var container = document.getElementById('catastro-container');
   var riesgo = records.filter(function(r) { return r.tipo !== 'registro'; });
@@ -6167,17 +6656,17 @@ function renderCatastro() {
     return;
   }
 
-  // ── Calcular datos ───────────────────────────────────────
-  var total = records.length;
-  var conGPS = records.filter(function(r) { return r.gps && r.gps.trim(); }).length;
-  var conFotos = records.filter(function(r) {
-    return (r.photos && r.photos.length) || (r.registroPhotos && r.registroPhotos.length);
-  }).length;
+  // ── Calcular datos (por árbol: ver calcCatastroStats) ───
+  var st = calcCatastroStats();
+  var total = st.total;
+  var nUnidades = st.unidades.length || 1;
+  var conGPS = st.conGPS;
+  var conFotos = st.conFotos;
 
-  var highCount = riesgo.filter(function(r) { return r.riskLevel === 'high'; }).length;
-  var modCount  = riesgo.filter(function(r) { return r.riskLevel === 'mod'; }).length;
-  var lowCount  = riesgo.filter(function(r) { return r.riskLevel === 'low'; }).length;
-  var sinRiesgo = riesgo.filter(function(r) { return !r.riskLevel; }).length;
+  var highCount = st.high;
+  var modCount  = st.mod;
+  var lowCount  = st.low;
+  var sinRiesgo = st.sinEval;
 
   // Inspectores detectados desde prefijos de código
   var inspectoresMap = {};
@@ -6193,15 +6682,8 @@ function renderCatastro() {
   });
   var inspectores = Object.values(inspectoresMap).sort(function(a,b) { return b.total - a.total; });
 
-  // Top 6 especies
-  var especiesMap = {};
-  records.forEach(function(r) {
-    if (!r.especie) return;
-    especiesMap[r.especie] = (especiesMap[r.especie] || 0) + 1;
-  });
-  var topEspecies = Object.entries(especiesMap)
-    .sort(function(a,b) { return b[1] - a[1]; })
-    .slice(0, 6);
+  // Top 6 especies (normalizadas con el catálogo, solo árboles)
+  var topEspecies = st.especies.slice(0, 6);
   var maxEsp = topEspecies.length ? topEspecies[0][1] : 1;
 
   // Alertas: riesgo alto + vencidos
@@ -6241,17 +6723,21 @@ function renderCatastro() {
     + '<div class="cat-section-title"><span>📋</span> Totales del catastro</div>'
     + '<div class="cat-totals">'
     + '<div class="cat-total-item"><div class="cat-total-val" style="color:var(--accent)">' + total + '</div><div class="cat-total-label">Árboles</div></div>'
+    + '<div class="cat-total-item"><div class="cat-total-val" style="color:var(--text2)">' + st.sitiosVacios.length + '</div><div class="cat-total-label">Sitios sin árbol</div></div>'
     + '<div class="cat-total-item"><div class="cat-total-val" style="color:var(--text2)">' + conGPS + '</div><div class="cat-total-label">Con GPS</div></div>'
     + '<div class="cat-total-item"><div class="cat-total-val" style="color:var(--text2)">' + conFotos + '</div><div class="cat-total-label">Con fotos</div></div>'
     + '</div>'
-    // Cobertura GPS
+    + (st.vinculadas
+        ? '<div style="font-family:var(--mono);font-size:10px;color:var(--text3);padding:0 14px 6px">' + st.vinculadas + ' evaluación(es) de riesgo vinculadas a su árbol (no se cuentan dos veces)</div>'
+        : '')
+    // Cobertura GPS (sobre árboles + sitios)
     + '<div class="cat-progress-wrap">'
-    + '<div class="cat-progress-label"><span>Cobertura GPS</span><span>' + conGPS + ' / ' + total + ' (' + Math.round(conGPS/total*100) + '%)</span></div>'
-    + '<div class="cat-progress-track"><div class="cat-progress-fill" style="width:' + Math.round(conGPS/total*100) + '%;background:var(--accent)"></div></div>'
+    + '<div class="cat-progress-label"><span>Cobertura GPS</span><span>' + conGPS + ' / ' + st.unidades.length + ' (' + Math.round(conGPS/nUnidades*100) + '%)</span></div>'
+    + '<div class="cat-progress-track"><div class="cat-progress-fill" style="width:' + Math.round(conGPS/nUnidades*100) + '%;background:var(--accent)"></div></div>'
     + '</div>'
     + '<div class="cat-progress-wrap" style="padding-top:0">'
-    + '<div class="cat-progress-label"><span>Cobertura fotográfica</span><span>' + conFotos + ' / ' + total + ' (' + Math.round(conFotos/total*100) + '%)</span></div>'
-    + '<div class="cat-progress-track"><div class="cat-progress-fill" style="width:' + Math.round(conFotos/total*100) + '%;background:#0097a7"></div></div>'
+    + '<div class="cat-progress-label"><span>Cobertura fotográfica</span><span>' + conFotos + ' / ' + st.unidades.length + ' (' + Math.round(conFotos/nUnidades*100) + '%)</span></div>'
+    + '<div class="cat-progress-track"><div class="cat-progress-fill" style="width:' + Math.round(conFotos/nUnidades*100) + '%;background:#0097a7"></div></div>'
     + '</div>'
     + '</div>';
 
@@ -6276,8 +6762,8 @@ function renderCatastro() {
 
   // 4. Distribución de riesgo
   var riesgoHtml = '';
-  if (riesgo.length > 0) {
-    var totalRiesgo = riesgo.length;
+  if (total > 0) {
+    var totalRiesgo = total;
     function bar(label, count, color) {
       if (!count) return '';
       var pct = Math.round(count/totalRiesgo*100);
@@ -6290,7 +6776,7 @@ function renderCatastro() {
         + '</div></div></div>';
     }
     riesgoHtml = '<div class="cat-section" style="margin-bottom:14px">'
-      + '<div class="cat-section-title"><span>⚠️</span> Distribución de riesgo</div>'
+      + '<div class="cat-section-title"><span>⚠️</span> Distribución de riesgo (por árbol, última evaluación)</div>'
       + '<div class="cat-chart">'
       + bar('ALTO', highCount, 'var(--high)')
       + bar('MODERADO', modCount, 'var(--mod)')
@@ -6309,13 +6795,42 @@ function renderCatastro() {
       especiesHtml += '<div class="cat-especie-row">'
         + '<div class="cat-especie-rank">' + (i+1) + '</div>'
         + '<div style="flex:1;min-width:0">'
-        + '<div class="cat-especie-name">' + esc(entry[0]) + '</div>'
+        + '<div class="cat-especie-name">' + esc(entry[0])
+        +   (buscarEspecie(entry[0]) ? ' <span style="font-style:normal;font-weight:400;color:var(--text3)">· ' + esc(buscarEspecie(entry[0]).comun) + '</span>' : '')
+        + '</div>'
         + '<div class="cat-especie-bar"><div class="cat-especie-bar-fill" style="width:' + pct + '%"></div></div>'
         + '</div>'
         + '<div class="cat-especie-count">' + entry[1] + '</div>'
         + '</div>';
     });
     especiesHtml += '</div>';
+  }
+
+  // 5b. Origen de las especies y sitios sin árbol
+  function catRow(label, n, base, color) {
+    return '<div style="display:flex;justify-content:space-between;padding:7px 14px;border-top:1px solid var(--border);font-family:var(--mono);font-size:11px">'
+      + '<span style="color:' + (color || 'var(--text2)') + '">' + label + '</span>'
+      + '<span style="font-weight:700;color:var(--text)">' + n + (base ? ' <span style="color:var(--text3);font-weight:400">(' + Math.round(n / base * 100) + '%)</span>' : '') + '</span></div>';
+  }
+  var origenHtml = '';
+  if (total > 0) {
+    var o = st.origen, conEsp = total - o.sinEspecie;
+    origenHtml = '<div class="cat-section" style="margin-bottom:14px">'
+      + '<div class="cat-section-title"><span>🧭</span> Origen de las especies</div>'
+      + catRow('Nativas de Argentina', o.nativa || 0, conEsp, 'var(--low)')
+      + catRow('Exóticas', o['exótica'] || 0, conEsp)
+      + (o.invasora ? catRow('↳ de ellas, invasoras', o.invasora, conEsp, 'var(--high)') : '')
+      + (o.fuera ? catRow('Fuera del catálogo (revisar nombre)', o.fuera, conEsp, 'var(--mod)') : '')
+      + (o.sinEspecie ? catRow('Sin especie cargada', o.sinEspecie, 0, 'var(--text3)') : '')
+      + '</div>';
+  }
+  if (st.sitiosVacios.length) {
+    origenHtml += '<div class="cat-section" style="margin-bottom:14px">'
+      + '<div class="cat-section-title"><span>🕳</span> Sitios sin árbol (' + st.sitiosVacios.length + ')</div>'
+      + Object.keys(st.sitiosPorCondicion).map(function(k) {
+          return catRow(esc(CONDICION_LABEL[k] || k), st.sitiosPorCondicion[k], 0);
+        }).join('')
+      + '</div>';
   }
 
   // 6. Alertas
@@ -6348,7 +6863,7 @@ function renderCatastro() {
   // 7. Botón PDF
   var pdfHtml = '<button type="button" class="cat-pdf-btn" onclick="exportCatastroPDF()">📄 Generar informe PDF del catastro</button>';
 
-  container.innerHTML = headerHtml + totalesHtml + inspHtml + riesgoHtml + especiesHtml + alertasHtml + pdfHtml;
+  container.innerHTML = headerHtml + totalesHtml + buildVinculoSection() + inspHtml + riesgoHtml + especiesHtml + origenHtml + alertasHtml + pdfHtml;
 }
 
 // ============================================================
@@ -6450,18 +6965,17 @@ async function exportCatastroPDF() {
     y += h;
   }
 
-  // Datos
-  var riesgo = records.filter(function(r) { return r.tipo !== 'registro'; });
-  var total = records.length;
-  var conGPS = records.filter(function(r) { return r.gps && r.gps.trim(); }).length;
-  var conFotos = records.filter(function(r) { return (r.photos&&r.photos.length)||(r.registroPhotos&&r.registroPhotos.length); }).length;
-  var highCount = riesgo.filter(function(r) { return r.riskLevel==='high'; }).length;
-  var modCount  = riesgo.filter(function(r) { return r.riskLevel==='mod'; }).length;
-  var lowCount  = riesgo.filter(function(r) { return r.riskLevel==='low'; }).length;
-
-  var especiesMap = {};
-  records.forEach(function(r) { if (r.especie) especiesMap[r.especie] = (especiesMap[r.especie]||0)+1; });
-  var topEsp = Object.entries(especiesMap).sort(function(a,b){return b[1]-a[1];}).slice(0,10);
+  // Datos (por árbol: mismos números que el panel, ver calcCatastroStats)
+  var st = calcCatastroStats();
+  var riesgo = st.riesgo;
+  var total = st.total;
+  var nUnidades = st.unidades.length || 1;
+  var conGPS = st.conGPS;
+  var conFotos = st.conFotos;
+  var highCount = st.high;
+  var modCount  = st.mod;
+  var lowCount  = st.low;
+  var topEsp = st.especies.slice(0, 10);
 
   var alertas = riesgo.filter(function(r) { return r.riskLevel==='high'; })
     .concat(riesgo.filter(function(r) {
@@ -6493,23 +7007,31 @@ async function exportCatastroPDF() {
   y += 28;
 
   sectionBar('1. Resumen general');
-  dataRow('Total de registros', total + ' árboles (' + riesgo.length + ' evaluaciones de riesgo, ' + (total-riesgo.length) + ' fichas de registro)');
-  dataRow('Cobertura GPS', conGPS + ' de ' + total + ' (' + Math.round(conGPS/total*100) + '%)');
-  dataRow('Cobertura fotográfica', conFotos + ' de ' + total + ' (' + Math.round(conFotos/total*100) + '%)');
+  dataRow('Árboles', total + ' (' + st.registros.length + ' fichas de registro, ' + riesgo.length + ' evaluaciones de riesgo, ' + st.vinculadas + ' vinculadas a su árbol)');
+  if (st.sitiosVacios.length) {
+    dataRow('Sitios sin árbol', st.sitiosVacios.length + ' (' + Object.keys(st.sitiosPorCondicion).map(function(k) {
+      return (CONDICION_LABEL[k] || k).toLowerCase() + ': ' + st.sitiosPorCondicion[k];
+    }).join(', ') + ')');
+  }
+  dataRow('Cobertura GPS', conGPS + ' de ' + st.unidades.length + ' (' + Math.round(conGPS/nUnidades*100) + '%)');
+  dataRow('Cobertura fotográfica', conFotos + ' de ' + st.unidades.length + ' (' + Math.round(conFotos/nUnidades*100) + '%)');
   dataRow('Fecha del informe', new Date().toLocaleDateString('es-AR',{day:'2-digit',month:'long',year:'numeric'}));
   if (cfg.proyecto) dataRow('Proyecto', cfg.proyecto);
   if (cfg.nombre) dataRow('Coordinador', cfg.nombre);
 
   sectionBar('2. Distribución de riesgo');
-  dataRow('Riesgo alto', highCount + ' árbol' + (highCount!==1?'es':'') + ' (' + (riesgo.length ? Math.round(highCount/riesgo.length*100) : 0) + '%)');
-  dataRow('Riesgo moderado', modCount + ' árbol' + (modCount!==1?'es':'') + ' (' + (riesgo.length ? Math.round(modCount/riesgo.length*100) : 0) + '%)');
-  dataRow('Riesgo bajo', lowCount + ' árbol' + (lowCount!==1?'es':'') + ' (' + (riesgo.length ? Math.round(lowCount/riesgo.length*100) : 0) + '%)');
+  function pctT(n) { return total ? Math.round(n/total*100) : 0; }
+  dataRow('Riesgo alto', highCount + ' árbol' + (highCount!==1?'es':'') + ' (' + pctT(highCount) + '%)');
+  dataRow('Riesgo moderado', modCount + ' árbol' + (modCount!==1?'es':'') + ' (' + pctT(modCount) + '%)');
+  dataRow('Riesgo bajo', lowCount + ' árbol' + (lowCount!==1?'es':'') + ' (' + pctT(lowCount) + '%)');
+  if (st.sinEval) dataRow('Sin evaluación', st.sinEval + ' árbol' + (st.sinEval!==1?'es':'') + ' (' + pctT(st.sinEval) + '%)');
+  dataRow('Criterio', 'Por árbol, según su evaluación de riesgo más reciente');
 
-  // Barra visual de riesgo
-  if (riesgo.length > 0) {
+  // Barra visual de riesgo (la parte sin color = árboles sin evaluación)
+  if (total > 0) {
     needSpace(18); y += 4;
     var barH = 12, barY = y;
-    var hPct = highCount/riesgo.length, mPct = modCount/riesgo.length, lPct = lowCount/riesgo.length;
+    var hPct = highCount/total, mPct = modCount/total, lPct = lowCount/total;
     doc.setFillColor(198,40,40); doc.rect(M, barY, CW*hPct, barH, 'F');
     doc.setFillColor(230,81,0);  doc.rect(M+CW*hPct, barY, CW*mPct, barH, 'F');
     doc.setFillColor(46,125,50); doc.rect(M+CW*(hPct+mPct), barY, CW*lPct, barH, 'F');
@@ -6520,8 +7042,15 @@ async function exportCatastroPDF() {
   if (topEsp.length > 0) {
     sectionBar('3. Composición por especie');
     topEsp.forEach(function(entry, i) {
-      dataRow((i+1) + '. ' + entry[0], entry[1] + ' ejemplar' + (entry[1]!==1?'es':''));
+      var info = buscarEspecie(entry[0]);
+      dataRow((i+1) + '. ' + entry[0], entry[1] + ' ejemplar' + (entry[1]!==1?'es':'')
+        + (info ? ' · ' + info.comun + ' · ' + info.origen + (info.invasora ? ' (invasora)' : '') : ' · fuera del catálogo'));
     });
+    var o = st.origen, conEsp = total - o.sinEspecie;
+    if (conEsp > 0) {
+      dataRow('Origen', 'Nativas: ' + (o.nativa||0) + ' (' + Math.round((o.nativa||0)/conEsp*100) + '%) · Exóticas: ' + (o['exótica']||0)
+        + ' (' + Math.round((o['exótica']||0)/conEsp*100) + '%) · Invasoras: ' + o.invasora + (o.fuera ? ' · Fuera del catálogo: ' + o.fuera : ''));
+    }
   }
 
   if (alertas.length > 0) {
@@ -6689,6 +7218,17 @@ function getDeviceId() {
 // ============================================================
 // EXPORTACIÓN GEOJSON
 // ============================================================
+// Código del árbol vinculado usando un índice id→ficha (evita recorrer records por fila).
+function indexById() {
+  var byId = {};
+  records.forEach(function(r) { byId[r.id] = r; });
+  return byId;
+}
+function arbolCodeFrom(byId, r) {
+  var a = r.arbolId ? byId[r.arbolId] : null;
+  return a && a.tipo === 'registro' ? (a.code || '') : '';
+}
+
 // Inspector de una ficha: el cargado en la ficha, el que la creó, o las iniciales del código.
 function recordInspector(r) {
   if (r.inspector) return r.inspector;
@@ -6706,6 +7246,7 @@ function parseGps(gps) {
 }
 
 function exportGeoJSON() {
+  var byId = indexById();
   var features = [];
   var sinGps = 0;
   records.forEach(function(r) {
@@ -6731,6 +7272,15 @@ function exportGeoJSON() {
       gps_fuente: r.gpsFuente || '',
       gps_precision_m: r.gpsPrecision != null ? r.gpsPrecision : null,
       barrio: r.barrio || '',
+      calle: r.calle || '',
+      numero: r.numero ? parseFloat(r.numero) : null,
+      emplazamiento: r.emplazamiento || '',
+      condicion_sitio: r.tipo === 'registro' ? (r.condicionSitio || 'arbol') : '',
+      conflictos: (r.conflictos || []).join('; '),
+      arbol_codigo: arbolCodeFrom(byId, r),
+      especie_comun: (buscarEspecie(r.especie) || {}).comun || '',
+      origen: (buscarEspecie(r.especie) || {}).origen || '',
+      invasora: buscarEspecie(r.especie) ? buscarEspecie(r.especie).invasora : null,
       intervencion: r.intervencion || '',
       actualizado: r.updatedAt || '',
     };
@@ -6784,14 +7334,24 @@ function csvCell(v, isNum) {
 function exportCSV() {
   if (!records.length) { showToast('No hay fichas para exportar', 'error'); return; }
   var RISK = { high: 'alto', mod: 'moderado', low: 'bajo' };
+  var byId = indexById();
   var cols = [
     ['codigo',            function(r) { return r.code; }],
     ['tipo',              function(r) { return r.tipo === 'registro' ? 'registro' : 'riesgo'; }],
+    ['arbol_codigo',      function(r) { return arbolCodeFrom(byId, r); }],
+    ['condicion_sitio',   function(r) { return r.tipo === 'registro' ? (CONDICION_LABEL[r.condicionSitio || 'arbol'] || r.condicionSitio) : ''; }],
     ['especie',           function(r) { return r.especie; }],
+    ['especie_comun',     function(r) { var e = buscarEspecie(r.especie); return e ? e.comun : ''; }],
+    ['origen',            function(r) { var e = buscarEspecie(r.especie); return e ? e.origen : (r.especie ? 'fuera de catálogo' : ''); }],
+    ['invasora',          function(r) { var e = buscarEspecie(r.especie); return e ? (e.invasora ? 'sí' : 'no') : ''; }],
     ['denominacion',      function(r) { return r.denominacion; }],
     ['cliente_proyecto',  function(r) { return r.cliente; }],
     ['ubicacion',         function(r) { return r.ubicacion; }],
     ['barrio',            function(r) { return r.barrio; }],
+    ['calle',             function(r) { return r.calle; }],
+    ['numero',            function(r) { return r.numero; }, true],
+    ['emplazamiento',     function(r) { return EMPLAZAMIENTO_LABEL[r.emplazamiento] || r.emplazamiento; }],
+    ['conflictos',        function(r) { return r.conflictos; }],
     ['propietario',       function(r) { return r.propietario; }],
     ['latitud',           function(r) { var p = parseGps(r.gps); return p ? p.lat : ''; }, true],
     ['longitud',          function(r) { var p = parseGps(r.gps); return p ? p.lon : ''; }, true],
@@ -6908,7 +7468,7 @@ function mergeImportData(input) {
       }
 
       // Migrar fotos base64 de los nuevos registros a IDB
-      await migratePhotosToIDB();
+      await migratePhotosToIDB(true);
       await cleanupOrphanPhotos();
 
       applyFilters(); updateStorage();
